@@ -57,6 +57,7 @@ import {
   BellRing,
   RefreshCw,
 } from 'lucide-react'
+import { canUseSupabase, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
 
 const STORAGE_KEY = 'mr-abdelrahman-platform'
 const TEACHER_PASSWORD = 'mr-abdelrahman123'
@@ -189,13 +190,47 @@ const defaultPlatform = {
   ],
 }
 
+function isValidPlatformData(value) {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      Array.isArray(value.students) &&
+      Array.isArray(value.codes) &&
+      Array.isArray(value.courses) &&
+      Array.isArray(value.lessons) &&
+      Array.isArray(value.assignments) &&
+      Array.isArray(value.quizzes) &&
+      Array.isArray(value.resources) &&
+      Array.isArray(value.achievements),
+  )
+}
+
 function getInitialPlatform() {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (!saved) return defaultPlatform
   try {
-    return JSON.parse(saved)
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (!saved) return defaultPlatform
+
+    const parsed = JSON.parse(saved)
+    if (isValidPlatformData(parsed)) {
+      return parsed
+    }
+
+    return defaultPlatform
   } catch {
     return defaultPlatform
+  }
+}
+
+async function hydratePlatformFromSupabase(setPlatform) {
+  if (!canUseSupabase()) return
+
+  try {
+    const externalData = await loadPlatformFromSupabase()
+    if (isValidPlatformData(externalData)) {
+      setPlatform(externalData)
+    }
+  } catch (error) {
+    console.error('Failed to hydrate platform from Supabase:', error)
   }
 }
 
@@ -212,17 +247,42 @@ function formatCurrency(value) {
 
 function App() {
   const [platform, setPlatform] = useState(getInitialPlatform)
+  const [platformHydrated, setPlatformHydrated] = useState(() => !canUseSupabase())
   const [auth, setAuth] = useState(() => {
-    const session = JSON.parse(localStorage.getItem('mr-platform-auth') || 'null')
-    return session || { role: null, studentId: null, teacher: false }
+    try {
+      const session = JSON.parse(localStorage.getItem('mr-platform-auth') || 'null')
+      return session || { role: null, studentId: null, teacher: false }
+    } catch {
+      return { role: null, studentId: null, teacher: false }
+    }
   })
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(platform))
-  }, [platform])
+    hydratePlatformFromSupabase(setPlatform).finally(() => {
+      setPlatformHydrated(true)
+    })
+  }, [])
 
   useEffect(() => {
-    localStorage.setItem('mr-platform-auth', JSON.stringify(auth))
+    if (!platformHydrated) return
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(platform))
+    } catch (error) {
+      console.error('Failed to save platform to localStorage:', error)
+    }
+
+    if (canUseSupabase()) {
+      savePlatformToSupabase(platform)
+    }
+  }, [platform, platformHydrated])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mr-platform-auth', JSON.stringify(auth))
+    } catch (error) {
+      console.error('Failed to save auth session to localStorage:', error)
+    }
   }, [auth])
 
   const student = platform.students.find((item) => item.id === auth.studentId) || null
@@ -968,7 +1028,7 @@ function StudentCoursesPage({ platform, student, logout, purchaseCourse }) {
               <div className='progress-bar'><span style={{ width: `${course.progress}%` }} /></div>
               {isPaidCourse && !hasPaidAccess ? (
                 <div className='form-stack'>
-                  <select value={selectedPaymentMethod[course.id] || 'cash'} onChange={(event) => setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
+                  <select value={selectedPaymentMethod[course.id] || 'cash'} onChange={(event)=> setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
                     <option value='cash'>Cash</option>
                     <option value='transfer'>Bank Transfer</option>
                     <option value='card'>Card</option>
