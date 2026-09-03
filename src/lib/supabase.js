@@ -23,8 +23,7 @@ export async function loadPlatformFromSupabase() {
     .maybeSingle()
 
   if (error && error.code !== 'PGRST116') {
-    console.error('Supabase load failed:', error)
-    return null
+    throw new Error(`Supabase load failed: ${error.message}`)
   }
 
   if (!data?.payload) return null
@@ -32,8 +31,7 @@ export async function loadPlatformFromSupabase() {
   try {
     return typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload
   } catch (error) {
-    console.error('Supabase payload parse failed:', error)
-    return null
+    throw new Error(`Supabase payload parse failed: ${error.message}`)
   }
 }
 
@@ -49,8 +47,7 @@ export async function savePlatformToSupabase(platform) {
       )
 
     if (error) {
-      console.error('Supabase save failed:', error)
-      return false
+      throw new Error(`Supabase save failed: ${error.message}`)
     }
 
     return true
@@ -58,4 +55,23 @@ export async function savePlatformToSupabase(platform) {
 
   platformSaveQueue = saveRequest.catch(() => undefined)
   return saveRequest
+}
+
+export async function createPaymentCheckout({ studentCode, planId, paymentMethod }) {
+  if (!supabase) {
+    throw new Error('Supabase is not configured for online payments.')
+  }
+
+  const { data, error } = await supabase.functions.invoke('create-payment', {
+    body: {
+      code: studentCode,
+      plan_slug: planId,
+      payment_method: paymentMethod,
+      idempotency_key: `${studentCode}:${planId}:${Date.now()}`,
+    },
+  })
+
+  if (error) throw new Error(`Payment checkout failed: ${error.message}`)
+  if (!data?.checkoutUrl) throw new Error('Payment provider did not return a checkout URL.')
+  return data.checkoutUrl
 }

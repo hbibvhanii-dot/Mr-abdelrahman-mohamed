@@ -57,7 +57,7 @@ import {
   BellRing,
   RefreshCw,
 } from 'lucide-react'
-import { canUseSupabase, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
+import { canUseSupabase, createPaymentCheckout, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
 
 const STORAGE_KEY = 'mr-abdelrahman-platform'
 const TEACHER_PASSWORD = 'mr-abdelrahman123'
@@ -978,7 +978,7 @@ function PlansPage({ platform }) {
   )
 }
 
-function StudentSubscriptionsPage({ platform, student, logout, purchaseSubscription }) {
+function StudentSubscriptionsPage({ platform, student, logout }) {
   const sidebar = [
     { to: '/student/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
     { to: '/student/courses', label: 'Courses', icon: <BookMarked size={16} /> },
@@ -988,7 +988,25 @@ function StudentSubscriptionsPage({ platform, student, logout, purchaseSubscript
     { to: '/student/profile', label: 'My Profile', icon: <UserRound size={16} /> },
   ]
   const [paymentMethod, setPaymentMethod] = useState({})
+  const [paymentError, setPaymentError] = useState('')
+  const [paymentLoading, setPaymentLoading] = useState('')
   const subscriptions = student?.personalFile?.subscriptions || []
+  const startPayment = async (planId) => {
+    setPaymentError('')
+    setPaymentLoading(planId)
+    try {
+      const checkoutUrl = await createPaymentCheckout({
+        studentCode: student.code,
+        planId,
+        paymentMethod: paymentMethod[planId] || 'card',
+      })
+      window.location.assign(checkoutUrl)
+    } catch (error) {
+      setPaymentError(error.message)
+    } finally {
+      setPaymentLoading('')
+    }
+  }
   return (
     <AppShell sidebar={sidebar} topbarTitle='اشتراكاتي' logout={logout}>
       <div className='plans-grid'>
@@ -1003,21 +1021,24 @@ function StudentSubscriptionsPage({ platform, student, logout, purchaseSubscript
               <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
               {subscription ? <span className={`badge ${subscription.status === 'paid' ? 'success' : 'warn'}`}>{subscription.status === 'paid' ? 'نشط' : 'قيد المراجعة'}</span> : (
                 <div className='form-stack full'>
-                  <select value={paymentMethod[plan.id] || 'vodafone_cash'} onChange={(event) => setPaymentMethod({ ...paymentMethod, [plan.id]: event.target.value })}>
-                    <option value='vodafone_cash'>فودافون كاش</option>
-                    <option value='visa'>فيزا</option>
+                  <select value={paymentMethod[plan.id] || 'card'} onChange={(event) => setPaymentMethod({ ...paymentMethod, [plan.id]: event.target.value })}>
+                    <option value='card'>بطاقة بنكية</option>
+                    <option value='wallet'>محفظة إلكترونية</option>
+                    <option value='fawry'>فوري</option>
                   </select>
                   <div className='payment-instructions'>
-                    {paymentMethod[plan.id] === 'visa' ? 'الدفع بالفيزا متاح يدويًا، تواصل مع المدرس لتأكيد التفاصيل.' : `حوّل المبلغ على فودافون كاش: ${PAYMENT_PHONE}`}
-                    <small>بعد التحويل أرسل صورة الإيصال للمدرس لتفعيل الاشتراك.</small>
+                    سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام العملية. لن يتم تفعيل الاشتراك إلا بعد تأكيد الدفع من البوابة.
                   </div>
-                  <button className='primary-button full' type='button' onClick={() => purchaseSubscription(student.id, plan.id, paymentMethod[plan.id] || 'vodafone_cash')}>إرسال طلب الاشتراك</button>
+                  <button className='primary-button full' type='button' disabled={paymentLoading === plan.id} onClick={() => startPayment(plan.id)}>
+                    {paymentLoading === plan.id ? 'جاري فتح بوابة الدفع...' : 'الدفع وتفعيل الاشتراك'}
+                  </button>
                 </div>
               )}
             </div>
           )
         })}
       </div>
+      {paymentError ? <div className='persistence-error' role='alert'>{paymentError}</div> : null}
     </AppShell>
   )
 }
