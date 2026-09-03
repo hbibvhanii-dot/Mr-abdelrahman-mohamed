@@ -61,6 +61,7 @@ import { canUseSupabase, loadPlatformFromSupabase, savePlatformToSupabase } from
 
 const STORAGE_KEY = 'mr-abdelrahman-platform'
 const TEACHER_PASSWORD = 'mr-abdelrahman123'
+const PAYMENT_PHONE = '01226937008'
 
 const defaultPlatform = {
   students: [
@@ -155,6 +156,11 @@ const defaultPlatform = {
     { id: 'g5', title: 'Speaking', description: 'Improve pronunciation, fluency, and confidence in speech.', level: 'Advanced', lessons: 11, progress: 63, category: 'speaking', accent: 'orange', price: 280, isPaid: true },
     { id: 'g6', title: 'Writing', description: 'Develop writing clarity for essays, emails, and tasks.', level: 'Intermediate', lessons: 8, progress: 81, category: 'writing', accent: 'pink', price: 300, isPaid: true },
   ],
+  subscriptionPlans: [
+    { id: 'basic', name: 'الباقة الأساسية', description: 'ابدأ أساسيات اللغة الإنجليزية بثقة.', price: 199, features: ['كورس General English', 'دروس القواعد الأساسية', 'متابعة التقدم'] },
+    { id: 'advanced', name: 'الباقة المتقدمة', description: 'طوّر مهاراتك في المحادثة والكتابة.', price: 349, features: ['كل محتوى الباقة الأساسية', 'Vocabulary وListening', 'اختبارات وواجبات إضافية'] },
+    { id: 'complete', name: 'الباقة الشاملة', description: 'تجربة تعليمية كاملة لكل مهارات اللغة.', price: 499, features: ['كل الكورسات والدروس', 'Speaking وWriting', 'دعم ومتابعة كاملة'] },
+  ],
   lessons: [
     { id: 'l1', title: 'Present Simple Tense', description: 'Daily actions and true statements in English.', difficulty: 'Beginner', duration: '18 min', category: 'Grammar', completed: true, type: 'Lesson', link: 'https://www.youtube.com/watch?v=7F3XHBRmWS4' },
     { id: 'l2', title: 'Past Simple', description: 'Talk about completed events in the past.', difficulty: 'Beginner', duration: '22 min', category: 'Grammar', completed: true, type: 'Video', link: 'https://www.youtube.com/watch?v=3v6x0yV9B0Q' },
@@ -205,6 +211,14 @@ function isValidPlatformData(value) {
   )
 }
 
+function normalizePlatformData(value) {
+  return {
+    ...defaultPlatform,
+    ...value,
+    subscriptionPlans: Array.isArray(value.subscriptionPlans) ? value.subscriptionPlans : defaultPlatform.subscriptionPlans,
+  }
+}
+
 function getInitialPlatform() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
@@ -212,7 +226,7 @@ function getInitialPlatform() {
 
     const parsed = JSON.parse(saved)
     if (isValidPlatformData(parsed)) {
-      return parsed
+      return normalizePlatformData(parsed)
     }
 
     return defaultPlatform
@@ -221,17 +235,29 @@ function getInitialPlatform() {
   }
 }
 
+function hasValidLocalPlatform() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    return saved ? isValidPlatformData(JSON.parse(saved)) : false
+  } catch {
+    return false
+  }
+}
+
 async function hydratePlatformFromSupabase(setPlatform) {
-  if (!canUseSupabase()) return
+  if (!canUseSupabase()) return false
 
   try {
     const externalData = await loadPlatformFromSupabase()
     if (isValidPlatformData(externalData)) {
-      setPlatform(externalData)
+      setPlatform(normalizePlatformData(externalData))
+      return true
     }
   } catch (error) {
     console.error('Failed to hydrate platform from Supabase:', error)
   }
+
+  return false
 }
 
 function getUniqueCode() {
@@ -248,6 +274,10 @@ function formatCurrency(value) {
 function App() {
   const [platform, setPlatform] = useState(getInitialPlatform)
   const [platformHydrated, setPlatformHydrated] = useState(() => !canUseSupabase())
+  const [persistenceReady, setPersistenceReady] = useState(
+    () => !canUseSupabase() || hasValidLocalPlatform(),
+  )
+  const [persistenceError, setPersistenceError] = useState(null)
   const [auth, setAuth] = useState(() => {
     try {
       const session = JSON.parse(localStorage.getItem('mr-platform-auth') || 'null')
@@ -258,13 +288,19 @@ function App() {
   })
 
   useEffect(() => {
-    hydratePlatformFromSupabase(setPlatform).finally(() => {
-      setPlatformHydrated(true)
-    })
+    hydratePlatformFromSupabase(setPlatform)
+      .then((hasExternalData) => {
+        if (hasExternalData || hasValidLocalPlatform()) {
+          setPersistenceReady(true)
+        } else {
+          setPersistenceError(new Error('No valid shared platform data found'))
+        }
+      })
+      .finally(() => setPlatformHydrated(true))
   }, [])
 
   useEffect(() => {
-    if (!platformHydrated) return
+    if (!platformHydrated || !persistenceReady) return
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(platform))
@@ -274,8 +310,13 @@ function App() {
 
     if (canUseSupabase()) {
       savePlatformToSupabase(platform)
+        .then(() => setPersistenceError(null))
+        .catch((error) => {
+          console.error('Failed to save platform to Supabase:', error)
+          setPersistenceError(error)
+        })
     }
-  }, [platform, platformHydrated])
+  }, [platform, platformHydrated, persistenceReady])
 
   useEffect(() => {
     try {
@@ -286,6 +327,13 @@ function App() {
   }, [auth])
 
   const student = platform.students.find((item) => item.id === auth.studentId) || null
+
+  useEffect(() => {
+    if (!persistenceError) return undefined
+
+    const timeoutId = window.setTimeout(() => setPersistenceError(null), 8000)
+    return () => window.clearTimeout(timeoutId)
+  }, [persistenceError])
 
   const loginStudent = (studentCode) => {
     const normalized = studentCode.trim().toUpperCase()
@@ -431,6 +479,40 @@ function App() {
         purchasedAt: new Date().toISOString(),
       }
 
+      const purchaseSubscription = (studentId, planId, paymentMethod = 'cash') => {
+        setPlatform((current) => {
+          const plan = current.subscriptionPlans?.find((item) => item.id === planId)
+          if (!plan) return current
+
+          return {
+            ...current,
+            students: current.students.map((student) => {
+              if (student.id !== studentId) return student
+              const currentFile = student.personalFile || {}
+              const subscriptions = currentFile.subscriptions || []
+              const existing = subscriptions.find((subscription) => subscription.planId === planId && subscription.status !== 'cancelled')
+              if (existing) return student
+
+              return {
+                ...student,
+                personalFile: {
+                  ...currentFile,
+                  subscriptions: [{
+                    id: `subscription-${Date.now()}`,
+                    planId: plan.id,
+                    planName: plan.name,
+                    amount: plan.price,
+                    paymentMethod,
+                    status: 'pending',
+                    subscribedAt: new Date().toISOString(),
+                  }, ...subscriptions],
+                },
+              }
+            }),
+          }
+        })
+      }
+
       return {
         ...current,
         students: current.students.map((student) => {
@@ -473,6 +555,33 @@ function App() {
             purchasedCourses,
             coursePayments,
           },
+        }
+
+        const updateSubscriptionStatus = (studentId, subscriptionId, status) => {
+          setPlatform((current) => ({
+            ...current,
+            students: current.students.map((student) => student.id !== studentId ? student : {
+              ...student,
+              personalFile: {
+                ...(student.personalFile || {}),
+                subscriptions: (student.personalFile?.subscriptions || []).map((subscription) =>
+                  subscription.id === subscriptionId ? { ...subscription, status } : subscription,
+                ),
+              },
+            }),
+          }))
+        }
+
+        const updateSubscriptionPlanPrice = (planId, price) => {
+          const numericPrice = Number(price)
+          if (!Number.isFinite(numericPrice) || numericPrice < 0) return
+
+          setPlatform((current) => ({
+            ...current,
+            subscriptionPlans: (current.subscriptionPlans || []).map((plan) =>
+              plan.id === planId ? { ...plan, price: numericPrice } : plan,
+            ),
+          }))
         }
       }),
     }))
@@ -597,44 +706,53 @@ function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/student-login" element={<StudentLoginPage loginStudent={loginStudent} />} />
-      <Route path="/teacher-login" element={<TeacherLoginPage loginTeacher={loginTeacher} />} />
+    <>
+      {persistenceError ? (
+        <div className='persistence-error' role='alert'>
+          تعذر حفظ البيانات على الخادم. تم الاحتفاظ بها محليًا، تحقق من إعدادات Supabase.
+        </div>
+      ) : null}
+      <Routes>
+        <Route path="/" element={<HomePage platform={platform} />} />
+        <Route path="/plans" element={<PlansPage platform={platform} />} />
+        <Route path="/student-login" element={<StudentLoginPage loginStudent={loginStudent} />} />
+        <Route path="/teacher-login" element={<TeacherLoginPage loginTeacher={loginTeacher} />} />
 
-      <Route element={<ProtectedRoute allowedRole="student" auth={auth} />}>
-        <Route path="/student/dashboard" element={<StudentDashboardPage student={student} platform={platform} logout={logout} />} />
-        <Route path="/student/courses" element={<StudentCoursesPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
-        <Route path="/student/course/:courseId" element={<StudentCourseDetailPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
-        <Route path="/student/lessons" element={<StudentLessonsPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/lesson/:lessonId" element={<StudentLessonDetailPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/assignments" element={<StudentAssignmentsPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/progress" element={<StudentProgressPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/achievements" element={<StudentAchievementsPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/resources" element={<StudentResourcesPage platform={platform} student={student} logout={logout} />} />
-        <Route path="/student/profile" element={<StudentProfilePage student={student} platform={platform} logout={logout} />} />
-      </Route>
+        <Route element={<ProtectedRoute allowedRole="student" auth={auth} />}>
+          <Route path="/student/dashboard" element={<StudentDashboardPage student={student} platform={platform} logout={logout} />} />
+          <Route path="/student/courses" element={<StudentCoursesPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
+          <Route path="/student/subscriptions" element={<StudentSubscriptionsPage platform={platform} student={student} logout={logout} purchaseSubscription={purchaseSubscription} />} />
+          <Route path="/student/course/:courseId" element={<StudentCourseDetailPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
+          <Route path="/student/lessons" element={<StudentLessonsPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/lesson/:lessonId" element={<StudentLessonDetailPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/assignments" element={<StudentAssignmentsPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/progress" element={<StudentProgressPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/achievements" element={<StudentAchievementsPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/resources" element={<StudentResourcesPage platform={platform} student={student} logout={logout} />} />
+          <Route path="/student/profile" element={<StudentProfilePage student={student} platform={platform} logout={logout} />} />
+        </Route>
 
-      <Route element={<ProtectedRoute allowedRole="teacher" auth={auth} />}>
-        <Route path="/teacher/dashboard" element={<TeacherDashboardPage platform={platform} logout={logout} />} />
-        <Route path="/teacher/students" element={<StudentsPage platform={platform} addStudent={addStudent} deleteStudent={deleteStudent} updateStudentStatus={updateStudentStatus} logout={logout} />} />
-        <Route path="/teacher/student/:studentId" element={<StudentManagementDetailPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
-        <Route path="/teacher/student-codes" element={<StudentCodesPage platform={platform} generateStudentCode={generateStudentCode} assignCodeToStudent={assignCodeToStudent} toggleCodeStatus={toggleCodeStatus} deleteCode={deleteCode} logout={logout} />} />
-        <Route path="/teacher/attendance" element={<TeacherAttendancePage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
-        <Route path="/teacher/fees" element={<TeacherFeesPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
-        <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} updateCoursePaymentStatus={updateCoursePaymentStatus} logout={logout} />} />
-        <Route path="/teacher/reports" element={<TeacherReportsPage platform={platform} logout={logout} />} />
-        <Route path="/teacher/courses" element={<CourseManagementPage platform={platform} addCourse={addCourse} deleteCourse={deleteCourse} logout={logout} />} />
-        <Route path="/teacher/lessons" element={<LessonManagementPage platform={platform} addLesson={addLesson} deleteLesson={deleteLesson} logout={logout} />} />
-        <Route path="/teacher/quizzes" element={<TeacherQuizPage platform={platform} addQuiz={addQuiz} logout={logout} />} />
-        <Route path="/teacher/assignments" element={<AssignmentManagementPage platform={platform} addAssignment={addAssignment} deleteAssignment={deleteAssignment} logout={logout} />} />
-        <Route path="/teacher/progress" element={<TeacherProgressPage platform={platform} logout={logout} />} />
-        <Route path="/teacher/resources" element={<ResourcesManagementPage platform={platform} addResource={addResource} deleteResource={deleteResource} logout={logout} />} />
-        <Route path="/teacher/settings" element={<TeacherSettingsPage logout={logout} />} />
-      </Route>
+        <Route element={<ProtectedRoute allowedRole="teacher" auth={auth} />}>
+          <Route path="/teacher/dashboard" element={<TeacherDashboardPage platform={platform} logout={logout} />} />
+          <Route path="/teacher/students" element={<StudentsPage platform={platform} addStudent={addStudent} deleteStudent={deleteStudent} updateStudentStatus={updateStudentStatus} logout={logout} />} />
+          <Route path="/teacher/student/:studentId" element={<StudentManagementDetailPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
+          <Route path="/teacher/student-codes" element={<StudentCodesPage platform={platform} generateStudentCode={generateStudentCode} assignCodeToStudent={assignCodeToStudent} toggleCodeStatus={toggleCodeStatus} deleteCode={deleteCode} logout={logout} />} />
+          <Route path="/teacher/attendance" element={<TeacherAttendancePage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
+          <Route path="/teacher/fees" element={<TeacherFeesPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
+          <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} updateCoursePaymentStatus={updateCoursePaymentStatus} updateSubscriptionStatus={updateSubscriptionStatus} updateSubscriptionPlanPrice={updateSubscriptionPlanPrice} logout={logout} />} />
+          <Route path="/teacher/reports" element={<TeacherReportsPage platform={platform} logout={logout} />} />
+          <Route path="/teacher/courses" element={<CourseManagementPage platform={platform} addCourse={addCourse} deleteCourse={deleteCourse} logout={logout} />} />
+          <Route path="/teacher/lessons" element={<LessonManagementPage platform={platform} addLesson={addLesson} deleteLesson={deleteLesson} logout={logout} />} />
+          <Route path="/teacher/quizzes" element={<TeacherQuizPage platform={platform} addQuiz={addQuiz} logout={logout} />} />
+          <Route path="/teacher/assignments" element={<AssignmentManagementPage platform={platform} addAssignment={addAssignment} deleteAssignment={deleteAssignment} logout={logout} />} />
+          <Route path="/teacher/progress" element={<TeacherProgressPage platform={platform} logout={logout} />} />
+          <Route path="/teacher/resources" element={<ResourcesManagementPage platform={platform} addResource={addResource} deleteResource={deleteResource} logout={logout} />} />
+          <Route path="/teacher/settings" element={<TeacherSettingsPage logout={logout} />} />
+        </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }
 
@@ -652,6 +770,9 @@ function ProtectedRoute({ auth, allowedRole }) {
 
 function AppShell({ children, sidebar, topbarTitle, logout }) {
   const location = useLocation()
+  const navigation = location.pathname.includes('/student') && !sidebar.some((item) => item.to === '/student/subscriptions')
+    ? [...sidebar.slice(0, 2), { to: '/student/subscriptions', label: 'Subscriptions', icon: <CreditCard size={16} /> }, ...sidebar.slice(2)]
+    : sidebar
 
   return (
     <div className='app-shell'>
@@ -664,7 +785,7 @@ function AppShell({ children, sidebar, topbarTitle, logout }) {
           </div>
         </div>
         <nav className='sidebar-nav'>
-          {sidebar.map((item) => (
+          {navigation.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <span className='nav-icon'>{item.icon}</span>
               <span>{item.label}</span>
@@ -713,7 +834,7 @@ function getTeacherSidebar() {
   ]
 }
 
-function HomePage() {
+function HomePage({ platform }) {
   return (
     <div className='page-shell'>
       <header className='landing-header'>
@@ -727,6 +848,7 @@ function HomePage() {
 
         <nav className='header-nav'>
           <Link to='/'>Home</Link>
+          <Link to='/plans'>الباقات</Link>
           <Link to='/student-login'>Student Login</Link>
           <Link to='/teacher-login'>Teacher Login</Link>
         </nav>
@@ -801,7 +923,104 @@ function HomePage() {
           <Link className='primary-button full' to='/teacher-login'>Teacher Login</Link>
         </div>
       </section>
+
+      <section className='plans-section'>
+        <div className='section-heading'>
+          <span className='eyebrow'>Simple monthly plans</span>
+          <h2>اختار الباقة المناسبة لك</h2>
+          <p>اشترك شهريًا وابدأ التعلم فور اعتماد التحويل أو الدفع اليدوي.</p>
+        </div>
+        <div className='plans-grid'>
+          {(platform.subscriptionPlans || []).map((plan, index) => (
+            <div key={plan.id} className={`plan-card ${index === 1 ? 'featured' : ''}`}>
+              {index === 1 ? <span className='plan-badge'>الأكثر اختيارًا</span> : null}
+              <Crown size={22} />
+              <h3>{plan.name}</h3>
+              <p>{plan.description}</p>
+              <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
+              <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
+              <Link className='primary-button full' to='/student-login'>ابدأ الاشتراك</Link>
+            </div>
+          ))}
+        </div>
+        <Link className='secondary-button plans-link' to='/plans'>عرض تفاصيل كل الباقات</Link>
+      </section>
     </div>
+  )
+}
+
+function PlansPage({ platform }) {
+  return (
+    <div className='page-shell'>
+      <header className='landing-header'>
+        <Link className='brand-row' to='/'>
+          <div className='brand-icon large'><GraduationCap size={24} /></div>
+          <div><div className='brand-title'>Mr Abdelrahman Mohamed</div><div className='brand-subtitle'>ENGLISH LEARNING PLATFORM</div></div>
+        </Link>
+        <Link className='secondary-button' to='/'>العودة للرئيسية</Link>
+      </header>
+      <section className='section-heading plans-page-heading'>
+        <span className='eyebrow'>Monthly subscriptions</span>
+        <h1>باقات اشتراك مرنة</h1>
+        <p>اختر الباقة، ثم أرسل طلبك. سيقوم المدرس بتأكيد الدفع يدويًا وتفعيل اشتراكك.</p>
+      </section>
+      <div className='plans-grid'>
+        {(platform.subscriptionPlans || []).map((plan) => (
+          <div key={plan.id} className='plan-card'>
+            <Crown size={22} />
+            <h3>{plan.name}</h3>
+            <p>{plan.description}</p>
+            <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
+            <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
+            <Link className='primary-button full' to='/student-login'>اختيار الباقة</Link>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function StudentSubscriptionsPage({ platform, student, logout, purchaseSubscription }) {
+  const sidebar = [
+    { to: '/student/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
+    { to: '/student/courses', label: 'Courses', icon: <BookMarked size={16} /> },
+    { to: '/student/subscriptions', label: 'Subscriptions', icon: <CreditCard size={16} /> },
+    { to: '/student/lessons', label: 'Lessons', icon: <Video size={16} /> },
+    { to: '/student/assignments', label: 'Assignments', icon: <ListTodo size={16} /> },
+    { to: '/student/profile', label: 'My Profile', icon: <UserRound size={16} /> },
+  ]
+  const [paymentMethod, setPaymentMethod] = useState({})
+  const subscriptions = student?.personalFile?.subscriptions || []
+  return (
+    <AppShell sidebar={sidebar} topbarTitle='اشتراكاتي' logout={logout}>
+      <div className='plans-grid'>
+        {(platform.subscriptionPlans || []).map((plan) => {
+          const subscription = subscriptions.find((item) => item.planId === plan.id && item.status !== 'cancelled')
+          return (
+            <div key={plan.id} className='plan-card'>
+              <Crown size={22} />
+              <h3>{plan.name}</h3>
+              <p>{plan.description}</p>
+              <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
+              <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
+              {subscription ? <span className={`badge ${subscription.status === 'paid' ? 'success' : 'warn'}`}>{subscription.status === 'paid' ? 'نشط' : 'قيد المراجعة'}</span> : (
+                <div className='form-stack full'>
+                  <select value={paymentMethod[plan.id] || 'vodafone_cash'} onChange={(event) => setPaymentMethod({ ...paymentMethod, [plan.id]: event.target.value })}>
+                    <option value='vodafone_cash'>فودافون كاش</option>
+                    <option value='visa'>فيزا</option>
+                  </select>
+                  <div className='payment-instructions'>
+                    {paymentMethod[plan.id] === 'visa' ? 'الدفع بالفيزا متاح يدويًا، تواصل مع المدرس لتأكيد التفاصيل.' : `حوّل المبلغ على فودافون كاش: ${PAYMENT_PHONE}`}
+                    <small>بعد التحويل أرسل صورة الإيصال للمدرس لتفعيل الاشتراك.</small>
+                  </div>
+                  <button className='primary-button full' type='button' onClick={() => purchaseSubscription(student.id, plan.id, paymentMethod[plan.id] || 'vodafone_cash')}>إرسال طلب الاشتراك</button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </AppShell>
   )
 }
 
@@ -1028,13 +1247,12 @@ function StudentCoursesPage({ platform, student, logout, purchaseCourse }) {
               <div className='progress-bar'><span style={{ width: `${course.progress}%` }} /></div>
               {isPaidCourse && !hasPaidAccess ? (
                 <div className='form-stack'>
-                  <select value={selectedPaymentMethod[course.id] || 'cash'} onChange={(event)=> setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
-                    <option value='cash'>Cash</option>
-                    <option value='transfer'>Bank Transfer</option>
-                    <option value='card'>Card</option>
+                  <select value={selectedPaymentMethod[course.id] || 'vodafone_cash'} onChange={(event)=> setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
+                    <option value='vodafone_cash'>فودافون كاش ({PAYMENT_PHONE})</option>
+                    <option value='visa'>فيزا</option>
                   </select>
-                  <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, selectedPaymentMethod[course.id] || 'cash', 'paid')}>
-                    Buy for {formatCurrency(course.price)}
+                  <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, selectedPaymentMethod[course.id] || 'vodafone_cash', 'pending')}>
+                    إرسال طلب الدفع - {formatCurrency(course.price)}
                   </button>
                 </div>
               ) : (
@@ -1086,12 +1304,15 @@ function StudentCourseDetailPage({ platform, student, logout, purchaseCourse }) 
           ) : (
             <div className='form-stack'>
               <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                <option value='cash'>Cash</option>
-                <option value='transfer'>Bank Transfer</option>
-                <option value='card'>Card</option>
+                <option value='vodafone_cash'>فودافون كاش ({PAYMENT_PHONE})</option>
+                <option value='visa'>فيزا</option>
               </select>
-              <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, paymentMethod, 'paid')}>
-                Pay {formatCurrency(course.price)} and unlock this course
+              <div className='payment-instructions'>
+                {paymentMethod === 'visa' ? 'الدفع بالفيزا متاح يدويًا، تواصل مع المدرس لتأكيد التفاصيل.' : `حوّل المبلغ على فودافون كاش: ${PAYMENT_PHONE}`}
+                <small>بعد التحويل أرسل صورة الإيصال للمدرس للمراجعة.</small>
+              </div>
+              <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, paymentMethod, 'pending')}>
+                إرسال طلب الدفع - {formatCurrency(course.price)}
               </button>
             </div>
           )}
@@ -1950,8 +2171,11 @@ function TeacherReportsPage({ platform, logout }) {
   )
 }
 
-function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout }) {
+function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateSubscriptionStatus, updateSubscriptionPlanPrice, logout }) {
   const teacherSidebar = getTeacherSidebar()
+  const [planPrices, setPlanPrices] = useState(() => Object.fromEntries(
+    (platform.subscriptionPlans || []).map((plan) => [plan.id, plan.price]),
+  ))
   const payments = platform.students.flatMap((student) => {
     const records = student.personalFile?.coursePayments || []
     return records.map((payment) => ({
@@ -1965,10 +2189,15 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout 
       purchasedAt: payment.purchasedAt,
     }))
   })
+  const subscriptions = platform.students.flatMap((student) => (student.personalFile?.subscriptions || []).map((subscription) => ({
+    ...subscription,
+    studentId: student.id,
+    studentName: student.name,
+  })))
 
   const totalRevenue = payments.filter((item) => item.status === 'paid').reduce((sum, item) => sum + item.amount, 0)
   const paidCount = payments.filter((item) => item.status === 'paid').length
-  const pendingCount = payments.filter((item) => item.status !== 'paid').length
+  const pendingCount = payments.filter((item) => item.status !== 'paid').length + subscriptions.filter((item) => item.status !== 'paid').length
 
   return (
     <AppShell sidebar={teacherSidebar} topbarTitle='إدارة الاشتراكات' logout={logout}>
@@ -1997,6 +2226,41 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout 
       </div>
 
       <div className='panel'>
+        <div className='panel-header'>
+          <div>
+            <h3>أسعار الباقات</h3>
+            <p>أدخل السعر الشهري لكل باقة وسيتم حفظه مباشرة.</p>
+          </div>
+        </div>
+        <div className='plan-price-editor'>
+          {(platform.subscriptionPlans || []).map((plan) => (
+            <div key={plan.id} className='form-group'>
+              <label htmlFor={`plan-price-${plan.id}`}>{plan.name}</label>
+              <div className='price-input-row'>
+                <input
+                  id={`plan-price-${plan.id}`}
+                  type='number'
+                  min='0'
+                  step='1'
+                  value={planPrices[plan.id] ?? ''}
+                  onChange={(event) => setPlanPrices({ ...planPrices, [plan.id]: event.target.value })}
+                  placeholder='اكتب السعر'
+                />
+                <span>ر.س / شهر</span>
+                <button
+                  type='button'
+                  className='mini-button'
+                  onClick={() => updateSubscriptionPlanPrice(plan.id, planPrices[plan.id])}
+                >
+                  حفظ السعر
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className='panel'>
         <div className='panel-header'><h3>سجل اشتراكات الطلاب</h3></div>
         <div className='list-table'>
           {payments.length === 0 ? (
@@ -2007,7 +2271,7 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout 
                 <div><strong>{item.studentName}</strong></div>
                 <div>{item.courseTitle}</div>
                 <div>{formatCurrency(item.amount)}</div>
-                <div>{item.paymentMethod}</div>
+                <div>{item.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
                 <div>
                   <select value={item.status} onChange={(event) => updateCoursePaymentStatus(item.studentId, item.courseId, event.target.value)}>
                     <option value='paid'>مدفوع</option>
@@ -2018,6 +2282,27 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout 
               </div>
             ))
           )}
+        </div>
+      </div>
+      <div className='panel'>
+        <div className='panel-header'><h3>طلبات الباقات الشهرية</h3></div>
+        <div className='list-table'>
+          {subscriptions.length === 0 ? <div className='table-row'><div>لا توجد طلبات باقات حتى الآن</div></div> : subscriptions.map((item) => (
+            <div key={item.id} className='table-row'>
+              <div><strong>{item.studentName}</strong></div>
+              <div>{item.planName}</div>
+              <div>{formatCurrency(item.amount)}</div>
+              <div>{item.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
+              <div>
+                <select value={item.status} onChange={(event) => updateSubscriptionStatus(item.studentId, item.id, event.target.value)}>
+                  <option value='paid'>مفعل</option>
+                  <option value='pending'>قيد المراجعة</option>
+                  <option value='cancelled'>مرفوض</option>
+                </select>
+              </div>
+              <div>{new Date(item.subscribedAt).toLocaleDateString('en-CA')}</div>
+            </div>
+          ))}
         </div>
       </div>
     </AppShell>
