@@ -479,40 +479,6 @@ function App() {
         purchasedAt: new Date().toISOString(),
       }
 
-      const purchaseSubscription = (studentId, planId, paymentMethod = 'cash') => {
-        setPlatform((current) => {
-          const plan = current.subscriptionPlans?.find((item) => item.id === planId)
-          if (!plan) return current
-
-          return {
-            ...current,
-            students: current.students.map((student) => {
-              if (student.id !== studentId) return student
-              const currentFile = student.personalFile || {}
-              const subscriptions = currentFile.subscriptions || []
-              const existing = subscriptions.find((subscription) => subscription.planId === planId && subscription.status !== 'cancelled')
-              if (existing) return student
-
-              return {
-                ...student,
-                personalFile: {
-                  ...currentFile,
-                  subscriptions: [{
-                    id: `subscription-${Date.now()}`,
-                    planId: plan.id,
-                    planName: plan.name,
-                    amount: plan.price,
-                    paymentMethod,
-                    status: 'pending',
-                    subscribedAt: new Date().toISOString(),
-                  }, ...subscriptions],
-                },
-              }
-            }),
-          }
-        })
-      }
-
       return {
         ...current,
         students: current.students.map((student) => {
@@ -557,33 +523,65 @@ function App() {
           },
         }
 
-        const updateSubscriptionStatus = (studentId, subscriptionId, status) => {
-          setPlatform((current) => ({
-            ...current,
-            students: current.students.map((student) => student.id !== studentId ? student : {
-              ...student,
-              personalFile: {
-                ...(student.personalFile || {}),
-                subscriptions: (student.personalFile?.subscriptions || []).map((subscription) =>
-                  subscription.id === subscriptionId ? { ...subscription, status } : subscription,
-                ),
-              },
-            }),
-          }))
-        }
-
-        const updateSubscriptionPlanPrice = (planId, price) => {
-          const numericPrice = Number(price)
-          if (!Number.isFinite(numericPrice) || numericPrice < 0) return
-
-          setPlatform((current) => ({
-            ...current,
-            subscriptionPlans: (current.subscriptionPlans || []).map((plan) =>
-              plan.id === planId ? { ...plan, price: numericPrice } : plan,
-            ),
-          }))
-        }
       }),
+    }))
+  }
+
+  const purchaseSubscription = (studentId, planId, paymentMethod = 'cash') => {
+    setPlatform((current) => {
+      const plan = current.subscriptionPlans?.find((item) => item.id === planId)
+      if (!plan) return current
+      return {
+        ...current,
+        students: current.students.map((student) => {
+          if (student.id !== studentId) return student
+          const currentFile = student.personalFile || {}
+          const subscriptions = currentFile.subscriptions || []
+          const existing = subscriptions.find((subscription) => subscription.planId === planId && subscription.status !== 'cancelled')
+          if (existing) return student
+          return {
+            ...student,
+            personalFile: {
+              ...currentFile,
+              subscriptions: [{
+                id: `subscription-${Date.now()}`,
+                planId: plan.id,
+                planName: plan.name,
+                amount: plan.price,
+                paymentMethod,
+                status: 'pending',
+                subscribedAt: new Date().toISOString(),
+              }, ...subscriptions],
+            },
+          }
+        }),
+      }
+    })
+  }
+
+  const updateSubscriptionStatus = (studentId, subscriptionId, status) => {
+    setPlatform((current) => ({
+      ...current,
+      students: current.students.map((student) => student.id !== studentId ? student : {
+        ...student,
+        personalFile: {
+          ...(student.personalFile || {}),
+          subscriptions: (student.personalFile?.subscriptions || []).map((subscription) =>
+            subscription.id === subscriptionId ? { ...subscription, status } : subscription,
+          ),
+        },
+      }),
+    }))
+  }
+
+  const updateSubscriptionPlanPrice = (planId, price) => {
+    const numericPrice = Number(price)
+    if (!Number.isFinite(numericPrice) || numericPrice < 0) return
+    setPlatform((current) => ({
+      ...current,
+      subscriptionPlans: (current.subscriptionPlans || []).map((plan) =>
+        plan.id === planId ? { ...plan, price: numericPrice } : plan,
+      ),
     }))
   }
 
