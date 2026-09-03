@@ -9,7 +9,11 @@ function hex(bytes: ArrayBuffer) { return [...new Uint8Array(bytes)].map((x) => 
 async function validHmac(obj: any, signature: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.PAYMOB_HMAC_SECRET!), { name: "HMAC", hash: "SHA-512" }, false, ["sign"]);
   const digest = hex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(fields.map((f) => String(value(obj, f))).join("")));
-  return digest.length === signature.length && digest.split("").every((c, i) => c === signature[i]);
+  const expected = signature.toLowerCase();
+  if (digest.length !== expected.length) return false;
+  let different = 0;
+  for (let i = 0; i < digest.length; i += 1) different |= digest.charCodeAt(i) ^ expected.charCodeAt(i);
+  return different === 0;
 }
 Deno.serve(async (request) => {
   if (request.method !== "POST") return new Response("method_not_allowed", { status: 405 });
@@ -19,21 +23,33 @@ Deno.serve(async (request) => {
     if (!env.PAYMOB_HMAC_SECRET || !signature || !(await validHmac(obj, signature))) return new Response("invalid signature", { status: 401 });
     const gatewayId = String(obj.id);
     const orderId = obj.order?.id == null ? "" : String(obj.order.id);
-    let { data: payment } = await db.from("payments").select("id,status,plan_id,student_id").eq("gateway_transaction_id", gatewayId).maybeSingle();
+    let { data: payment } = await db.from("payments").select("id,status,plan_id,student_id,amount_cents,currency").eq("gateway_transaction_id", gatewayId).maybeSingle();
     if (!payment && orderId) {
-      ({ data: payment } = await db.from("payments").select("id,status,plan_id,student_id").eq("gateway_order_id", orderId).maybeSingle());
+      ({ data: payment } = await db.from("payments").select("id,status,plan_id,student_id,amount_cents,currency").eq("gateway_order_id", orderId).maybeSingle());
     }
     if (!payment) return new Response("ignored", { status: 200 });
     if (obj.pending === true) return new Response("ok", { status: 200 });
+    if (Number(obj.amount_cents) !== payment.amount_cents || String(obj.currency) !== payment.currency) {
+      return new Response("amount_mismatch", { status: 400 });
+    }
     const success = obj.success === true && obj.pending !== true && obj.error_occured !== true;
     if (payment.status === "paid" || payment.status === "failed") return new Response("ok", { status: 200 });
-    const status = success ? "paid" : "failed";
-    const { error } = await db.from("payments").update({ status, gateway_transaction_id: gatewayId, gateway_payload: body, paid_at: success ? new Date().toISOString() : null }).eq("id", payment.id).eq("status", "pending");
-    if (error) throw error;
     if (success) {
-      const { data: plan } = await db.from("plans").select("duration_days").eq("id", payment.plan_id).single();
-      if (plan) await db.from("subscriptions").insert({ student_id: payment.student_id, plan_id: payment.plan_id, payment_id: payment.id, starts_at: new Date().toISOString(), expires_at: new Date(Date.now() + plan.duration_days * 86400000).toISOString() });
+      const { error: activationError } = await db.rpc("confirm_payment", {
+        payment_uuid: payment.id,
+        transaction_id: gatewayId,
+        provider_payload: body,
+      });
+      if (activationError) throw activationError;
+    } else {
+      const { error } = await db.from("payments").update({
+        status: "failed", gateway_transaction_id: gatewayId, gateway_payload: body,
+      }).eq("id", payment.id).eq("status", "pending");
+      if (error) throw error;
     }
     return new Response("ok", { status: 200 });
-  } catch { return new Response("webhook_error", { status: 500 }); }
+  } catch (error) {
+    console.error("Payment webhook processing failed", error);
+    return new Response("webhook_error", { status: 500 });
+  }
 });

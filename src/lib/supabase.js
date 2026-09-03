@@ -39,15 +39,20 @@ export async function savePlatformToSupabase(platform) {
   if (!supabase) return false
 
   const saveRequest = platformSaveQueue.then(async () => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('platform_data')
       .upsert(
         { id: 'main', payload: platform },
         { onConflict: 'id' },
       )
+      .select('id')
+      .single()
 
     if (error) {
       throw new Error(`Supabase save failed: ${error.message}`)
+    }
+    if (data?.id !== 'main') {
+      throw new Error('Supabase save was not confirmed.')
     }
 
     return true
@@ -57,7 +62,7 @@ export async function savePlatformToSupabase(platform) {
   return saveRequest
 }
 
-export async function createPaymentCheckout({ studentCode, planId, paymentMethod }) {
+export async function createPaymentCheckout({ studentCode, planId, paymentMethod, customer }) {
   if (!supabase) {
     throw new Error('Supabase is not configured for online payments.')
   }
@@ -67,11 +72,22 @@ export async function createPaymentCheckout({ studentCode, planId, paymentMethod
       code: studentCode,
       plan_slug: planId,
       payment_method: paymentMethod,
-      idempotency_key: `${studentCode}:${planId}:${Date.now()}`,
+      idempotency_key: `${studentCode}:${planId}`,
+      customer,
     },
   })
 
   if (error) throw new Error(`Payment checkout failed: ${error.message}`)
-  if (!data?.checkoutUrl) throw new Error('Payment provider did not return a checkout URL.')
-  return data.checkoutUrl
+  const checkoutUrl = data?.checkout_url || data?.checkoutUrl
+  if (!checkoutUrl) throw new Error('Payment provider did not return a checkout URL.')
+  return checkoutUrl
+}
+
+export async function authenticateStudentCode(code) {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('authenticate_student_code', {
+    input_code: code,
+  })
+  if (error) throw new Error(`Student authentication failed: ${error.message}`)
+  return data?.[0] || null
 }

@@ -20,21 +20,26 @@ async function paymob(path: string, body: unknown) {
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: { ...cors, "access-control-allow-headers": "content-type" } });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  let paymentId = "";
   try {
     const { code, plan_slug, idempotency_key, payment_method, customer } = await request.json();
     if (typeof code !== "string" || typeof plan_slug !== "string" || typeof idempotency_key !== "string" ||
-        !/^[\w:.\/-]{8,128}$/.test(idempotency_key)) return json({ error: "invalid_request" }, 400);
+        !/^[\w:.\/-]{8,128}$/.test(idempotency_key) ||
+        !["card", "wallet", "fawry"].includes(payment_method)) return json({ error: "invalid_request" }, 400);
     const { data: student, error: codeError } = await supabase.rpc("validate_student_code", { input_code: code });
     if (codeError || !student?.[0]) return json({ error: "invalid_or_expired_code" }, 403);
     const { data: plan, error: planError } = await supabase.from("plans").select("*").eq("slug", plan_slug).eq("active", true).maybeSingle();
     if (planError || !plan) return json({ error: "plan_unavailable" }, 404);
     const studentId = student[0].student_id;
+    const codeId = student[0].code_id;
     const { data: existing } = await supabase.from("payments").select("id,status,checkout_token,checkout_url").match({ student_id: studentId, plan_id: plan.id, idempotency_key }).maybeSingle();
     if (existing?.status === "paid" || existing?.checkout_url) return json({ payment_id: existing.id, status: existing.status, checkout_url: existing.checkout_url, checkout_token: existing.checkout_token });
     const { data: payment, error: insertError } = await supabase.from("payments").insert({
-      student_id: studentId, plan_id: plan.id, idempotency_key, amount_cents: plan.amount_cents, currency: plan.currency,
+      student_id: studentId, code_id: codeId, plan_id: plan.id, idempotency_key,
+      amount_cents: plan.amount_cents, currency: plan.currency, gateway: "paymob",
     }).select("id").single();
     if (insertError) return json({ error: "payment_already_in_progress" }, 409);
+    paymentId = payment.id;
 
     // This adapter follows Paymob Accept's auth -> order -> payment-key flow.
     const auth = await paymob("/auth/tokens", { api_key: env.PAYMOB_API_KEY });
@@ -53,6 +58,12 @@ Deno.serve(async (request) => {
     await supabase.from("payments").update({ gateway_order_id: String(order.id), checkout_token: key.token, checkout_url: checkoutUrl, gateway_payload: { order_id: order.id } }).eq("id", payment.id);
     return json({ payment_id: payment.id, status: "pending", checkout_url: checkoutUrl, checkout_token: key.token });
   } catch (error) {
+    if (paymentId) {
+      await supabase.from("payments").update({
+        status: "failed",
+        gateway_payload: { error: error instanceof Error ? error.message : "unknown" },
+      }).eq("id", paymentId).eq("status", "pending");
+    }
     return json({ error: "payment_provider_unavailable", detail: error instanceof Error ? error.message : "unknown" }, 502);
   }
 });

@@ -57,97 +57,15 @@ import {
   BellRing,
   RefreshCw,
 } from 'lucide-react'
-import { canUseSupabase, createPaymentCheckout, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
+import { authenticateStudentCode, canUseSupabase, createPaymentCheckout, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
 
 const STORAGE_KEY = 'mr-abdelrahman-platform'
 const TEACHER_PASSWORD = 'mr-abdelrahman123'
-const PAYMENT_PHONE = '01226937008'
+const PAYMENT_PHONE = '01014812293'
 
 const defaultPlatform = {
-  students: [
-    {
-      id: 'stu-1',
-      name: 'أمينة حسن',
-      email: 'amina.hassan@example.com',
-      level: 'متوسط',
-      joinDate: '2025-01-10',
-      status: 'active',
-      progress: 72,
-      lastActivity: 'قبل ساعتين',
-      code: 'STU-8K4P-29MX',
-      personalFile: {
-        examResults: [
-          { id: 'ex-1', title: 'اختبار القواعد', score: 88, date: '2026-08-10' },
-          { id: 'ex-2', title: 'اختبار الاستماع', score: 92, date: '2026-08-18' },
-        ],
-        attendance: [
-          { id: 'att-1', date: '2026-08-20', status: 'حاضر' },
-          { id: 'att-2', date: '2026-08-21', status: 'غائب' },
-          { id: 'att-3', date: '2026-08-22', status: 'حاضر' },
-        ],
-        monthlyFees: [
-          { id: 'fee-1', month: 'أغسطس', amount: 250, status: 'مدفوع' },
-          { id: 'fee-2', month: 'سبتمبر', amount: 250, status: 'قيد الدفع' },
-        ],
-      },
-    },
-    {
-      id: 'stu-2',
-      name: 'عمر صالح',
-      email: 'omar.saleh@example.com',
-      level: 'مبتدئ',
-      joinDate: '2025-02-18',
-      status: 'active',
-      progress: 56,
-      lastActivity: 'أمس',
-      code: 'STU-3Q8A-12ER',
-      personalFile: {
-        examResults: [
-          { id: 'ex-3', title: 'اختبار المفردات', score: 76, date: '2026-08-12' },
-        ],
-        attendance: [
-          { id: 'att-4', date: '2026-08-20', status: 'حاضر' },
-          { id: 'att-5', date: '2026-08-21', status: 'حاضر' },
-          { id: 'att-6', date: '2026-08-22', status: 'متأخر' },
-        ],
-        monthlyFees: [
-          { id: 'fee-3', month: 'أغسطس', amount: 250, status: 'مدفوع' },
-        ],
-      },
-    },
-    {
-      id: 'stu-3',
-      name: 'سارة علي',
-      email: 'sara.ali@example.com',
-      level: 'متقدم',
-      joinDate: '2024-12-04',
-      status: 'paused',
-      progress: 88,
-      lastActivity: 'قبل 3 أيام',
-      code: 'STU-9FD2-44BG',
-      personalFile: {
-        examResults: [
-          { id: 'ex-4', title: 'اختبار الكتابة', score: 95, date: '2026-08-14' },
-          { id: 'ex-5', title: 'اختبار المحادثة', score: 90, date: '2026-08-19' },
-        ],
-        attendance: [
-          { id: 'att-7', date: '2026-08-20', status: 'حاضر' },
-          { id: 'att-8', date: '2026-08-21', status: 'حاضر' },
-          { id: 'att-9', date: '2026-08-22', status: 'حاضر' },
-        ],
-        monthlyFees: [
-          { id: 'fee-4', month: 'أغسطس', amount: 250, status: 'مدفوع' },
-          { id: 'fee-5', month: 'سبتمبر', amount: 250, status: 'مدفوع' },
-        ],
-      },
-    },
-  ],
-  codes: [
-    { id: 'code-1', code: 'STU-8K4P-29MX', studentId: 'stu-1', studentName: 'Amina Hassan', status: 'active', createdAt: '2025-01-10' },
-    { id: 'code-2', code: 'STU-3Q8A-12ER', studentId: 'stu-2', studentName: 'Omar Saleh', status: 'active', createdAt: '2025-02-18' },
-    { id: 'code-3', code: 'STU-9FD2-44BG', studentId: 'stu-3', studentName: 'Sara Ali', status: 'disabled', createdAt: '2024-12-04' },
-    { id: 'code-4', code: 'STU-7MKV-76AZ', studentId: null, studentName: 'Unassigned', status: 'active', createdAt: '2025-03-09' },
-  ],
+  students: [],
+  codes: [],
   courses: [
     { id: 'g1', title: 'General English', description: 'Build fluency and confidence in everyday communication.', level: 'Beginner', lessons: 12, progress: 68, category: 'general', accent: 'cyan', price: 250, isPaid: true },
     { id: 'g2', title: 'Grammar', description: 'Master grammar rules and sentence structure with clarity.', level: 'Intermediate', lessons: 14, progress: 82, category: 'grammar', accent: 'purple', price: 320, isPaid: true },
@@ -161,6 +79,7 @@ const defaultPlatform = {
     { id: 'advanced', name: 'الباقة المتقدمة', description: 'طوّر مهاراتك في المحادثة والكتابة.', price: 349, features: ['كل محتوى الباقة الأساسية', 'Vocabulary وListening', 'اختبارات وواجبات إضافية'] },
     { id: 'complete', name: 'الباقة الشاملة', description: 'تجربة تعليمية كاملة لكل مهارات اللغة.', price: 499, features: ['كل الكورسات والدروس', 'Speaking وWriting', 'دعم ومتابعة كاملة'] },
   ],
+  subscriptionRequests: [],
   lessons: [
     { id: 'l1', title: 'Present Simple Tense', description: 'Daily actions and true statements in English.', difficulty: 'Beginner', duration: '18 min', category: 'Grammar', completed: true, type: 'Lesson', link: 'https://www.youtube.com/watch?v=7F3XHBRmWS4' },
     { id: 'l2', title: 'Past Simple', description: 'Talk about completed events in the past.', difficulty: 'Beginner', duration: '22 min', category: 'Grammar', completed: true, type: 'Video', link: 'https://www.youtube.com/watch?v=3v6x0yV9B0Q' },
@@ -212,10 +131,19 @@ function isValidPlatformData(value) {
 }
 
 function normalizePlatformData(value) {
+  const demoStudentIds = new Set(['stu-1', 'stu-2', 'stu-3'])
+  const students = (Array.isArray(value.students) ? value.students : [])
+    .filter((student) => !demoStudentIds.has(student.id))
+  const studentIds = new Set(students.map((student) => student.id))
   return {
     ...defaultPlatform,
     ...value,
+    students,
+    codes: (Array.isArray(value.codes) ? value.codes : []).filter(
+      (code) => !demoStudentIds.has(code.studentId) && (!code.studentId || studentIds.has(code.studentId)),
+    ),
     subscriptionPlans: Array.isArray(value.subscriptionPlans) ? value.subscriptionPlans : defaultPlatform.subscriptionPlans,
+    subscriptionRequests: Array.isArray(value.subscriptionRequests) ? value.subscriptionRequests : [],
   }
 }
 
@@ -250,7 +178,24 @@ async function hydratePlatformFromSupabase(setPlatform) {
   try {
     const externalData = await loadPlatformFromSupabase()
     if (isValidPlatformData(externalData)) {
-      setPlatform(normalizePlatformData(externalData))
+      let localData = null
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY)
+        localData = saved ? JSON.parse(saved) : null
+      } catch (error) {
+        console.error('Failed to read local platform backup:', error)
+      }
+      const remotePlatform = normalizePlatformData(externalData)
+      const localPlatform = localData && isValidPlatformData(localData)
+        ? normalizePlatformData(localData)
+        : null
+      const remoteIsEmpty = remotePlatform.students.length === 0
+        && remotePlatform.codes.length === 0
+      if (remoteIsEmpty && localPlatform && (localPlatform.students.length > 0 || localPlatform.codes.length > 0)) {
+        setPlatform(localPlatform)
+      } else {
+        setPlatform(remotePlatform)
+      }
       return true
     }
   } catch (error) {
@@ -268,14 +213,14 @@ function getUniqueCode() {
 }
 
 function formatCurrency(value) {
-  return `${Number(value || 0).toLocaleString('en-US')} ر.س`
+  return `${Number(value || 0).toLocaleString('ar-EG')} ج.م`
 }
 
 function App() {
   const [platform, setPlatform] = useState(getInitialPlatform)
   const [platformHydrated, setPlatformHydrated] = useState(() => !canUseSupabase())
   const [persistenceReady, setPersistenceReady] = useState(
-    () => !canUseSupabase() || hasValidLocalPlatform(),
+    () => !canUseSupabase(),
   )
   const [persistenceError, setPersistenceError] = useState(null)
   const [auth, setAuth] = useState(() => {
@@ -288,13 +233,26 @@ function App() {
   })
 
   useEffect(() => {
+    if (auth.role !== 'student' || !auth.subscriptionExpiresAt) return undefined
+    const checkExpiry = () => {
+      if (new Date(auth.subscriptionExpiresAt).getTime() <= Date.now() && auth.subscriptionStatus === 'active') {
+        setAuth((current) => ({ ...current, subscriptionStatus: 'expired' }))
+      }
+    }
+    checkExpiry()
+    const intervalId = window.setInterval(checkExpiry, 60_000)
+    return () => window.clearInterval(intervalId)
+  }, [auth.role, auth.subscriptionExpiresAt, auth.subscriptionStatus])
+
+  useEffect(() => {
     hydratePlatformFromSupabase(setPlatform)
       .then((hasExternalData) => {
-        if (hasExternalData || hasValidLocalPlatform()) {
-          setPersistenceReady(true)
-        } else {
-          setPersistenceError(new Error('No valid shared platform data found'))
+        // Seed an empty Supabase project from the existing platform once.
+        // Subsequent devices hydrate from the shared record.
+        if (!hasExternalData && !hasValidLocalPlatform()) {
+          setPlatform(defaultPlatform)
         }
+        setPersistenceReady(true)
       })
       .finally(() => setPlatformHydrated(true))
   }, [])
@@ -326,7 +284,8 @@ function App() {
     }
   }, [auth])
 
-  const student = platform.students.find((item) => item.id === auth.studentId) || null
+  const student = platform.students.find((item) => item.id === auth.studentId)
+    || (auth.studentProfile ? { id: auth.studentId, ...auth.studentProfile } : null)
 
   useEffect(() => {
     if (!persistenceError) return undefined
@@ -335,21 +294,75 @@ function App() {
     return () => window.clearTimeout(timeoutId)
   }, [persistenceError])
 
-  const loginStudent = (studentCode) => {
+  const loginStudent = async (studentCode) => {
     const normalized = studentCode.trim().toUpperCase()
+    if (canUseSupabase()) {
+      try {
+        const result = await authenticateStudentCode(normalized)
+        if (result) {
+          const expiresAt = result.subscription_expires_at
+          const subscriptionActive = result.subscription_status === 'active'
+          && expiresAt
+          && new Date(expiresAt).getTime() > Date.now()
+          setAuth({
+            role: 'student',
+            studentId: result.student_id,
+            teacher: false,
+            codeId: result.code_id,
+            studentCode: normalized,
+            studentProfile: {
+              name: result.student_name,
+              email: result.student_email,
+              phone: result.student_phone,
+            },
+            subscriptionStatus: subscriptionActive ? 'active' : 'expired',
+            subscriptionExpiresAt: expiresAt || null,
+            subscription: result.subscription_expires_at ? {
+              planName: result.subscription_plan_name,
+              startsAt: result.subscription_starts_at,
+              expiresAt: result.subscription_expires_at,
+              status: result.subscription_status,
+            } : null,
+          })
+          return {
+            ok: true,
+            redirectTo: subscriptionActive ? '/student/dashboard' : '/student/subscriptions',
+            message: subscriptionActive ? 'Welcome back!' : 'انتهى اشتراكك، يرجى تجديد الاشتراك للاستمرار.',
+          }
+        }
+      } catch (error) {
+        console.error('Student authentication failed in Supabase, trying shared platform data:', error)
+      }
+    }
     const activeCode = platform.codes.find(
-      (code) => code.code === normalized && code.status === 'active' && code.studentId,
+      (code) => code.code?.trim().toUpperCase() === normalized
+        && code.status === 'active'
+        && code.studentId,
     )
 
     if (activeCode) {
       const matchedStudent = platform.students.find((s) => s.id === activeCode.studentId)
       if (matchedStudent) {
-        setAuth({ role: 'student', studentId: matchedStudent.id, teacher: false })
-        return { ok: true, message: 'Welcome back!' }
+        const activeSubscription = (matchedStudent.personalFile?.subscriptions || []).find((subscription) =>
+          (subscription.status === 'active' || subscription.status === 'paid')
+          && new Date(subscription.expiresAt || subscription.expires_at || 0).getTime() > Date.now(),
+        )
+        setAuth({
+          role: 'student',
+          studentId: matchedStudent.id,
+          teacher: false,
+          subscriptionStatus: activeSubscription ? 'active' : 'expired',
+          subscriptionExpiresAt: activeSubscription?.expiresAt || activeSubscription?.expires_at || null,
+        })
+        return {
+          ok: true,
+          redirectTo: activeSubscription ? '/student/dashboard' : '/student/subscriptions',
+          message: activeSubscription ? 'Welcome back!' : 'انتهى اشتراكك، يرجى تجديد الاشتراك للاستمرار.',
+        }
       }
     }
 
-    return { ok: false, message: 'Invalid student code or code is disabled.' }
+    return { ok: false, message: 'كود الدخول غير صحيح.' }
   }
 
   const loginTeacher = (password) => {
@@ -425,7 +438,7 @@ function App() {
       status: 'active',
       progress: 0,
       lastActivity: 'الآن',
-      code: newStudent.code || 'not assigned',
+      code: (newStudent.code || 'not assigned').trim().toUpperCase(),
       personalFile: {
         examResults: [],
         attendance: [],
@@ -443,7 +456,7 @@ function App() {
       setPlatform((current) => ({
         ...current,
         codes: current.codes.map((code) =>
-          code.code === newStudent.code ? { ...code, studentId: studentRecord.id, studentName: newStudent.name } : code,
+          code.code === studentRecord.code ? { ...code, studentId: studentRecord.id, studentName: newStudent.name } : code,
         ),
       }))
     }
@@ -553,6 +566,54 @@ function App() {
                 subscribedAt: new Date().toISOString(),
               }, ...subscriptions],
             },
+          }
+
+          const createSubscriptionRequest = ({ name, phone, email, planId, paymentMethod }) => {
+            const request = {
+              id: `request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              name: name.trim(),
+              phone: phone.trim(),
+              email: email.trim(),
+              planId,
+              paymentMethod,
+              status: 'pending',
+              createdAt: new Date().toISOString(),
+              code: null,
+            }
+            setPlatform((current) => ({
+              ...current,
+              subscriptionRequests: [request, ...(current.subscriptionRequests || [])],
+            }))
+            return request.id
+          }
+
+          const approveSubscriptionRequest = (requestId) => {
+            setPlatform((current) => {
+              const request = (current.subscriptionRequests || []).find((item) => item.id === requestId)
+              if (!request || request.status === 'paid') return current
+              const plan = current.subscriptionPlans.find((item) => item.id === request.planId)
+              if (!plan) return current
+              const code = getUniqueCode()
+              const studentId = `stu-${Date.now()}`
+              const student = {
+                id: studentId, name: request.name, email: request.email, phone: request.phone,
+                level: 'مبتدئ', joinDate: new Date().toISOString().slice(0, 10), status: 'active',
+                progress: 0, lastActivity: 'الآن', code,
+                personalFile: { examResults: [], attendance: [], monthlyFees: [], purchasedCourses: [], subscriptions: [{
+                  id: `subscription-${Date.now()}`, planId: plan.id, planName: plan.name, amount: plan.price,
+                  paymentMethod: request.paymentMethod, status: 'paid', subscribedAt: new Date().toISOString(),
+                  startsAt: new Date().toISOString(),
+                  expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+                }] },
+              }
+              return {
+                ...current,
+                students: [student, ...current.students],
+                codes: [{ id: `code-${Date.now()}`, code, studentId, studentName: request.name, status: 'active', createdAt: student.joinDate }, ...current.codes],
+                subscriptionRequests: current.subscriptionRequests.map((item) => item.id === requestId
+                  ? { ...item, status: 'paid', code, studentId, confirmedAt: new Date().toISOString() } : item),
+              }
+            })
           }
         }),
       }
@@ -712,14 +773,15 @@ function App() {
       ) : null}
       <Routes>
         <Route path="/" element={<HomePage platform={platform} />} />
-        <Route path="/plans" element={<PlansPage platform={platform} />} />
+        <Route path="/plans" element={<PlansPage platform={platform} createSubscriptionRequest={createSubscriptionRequest} />} />
+        <Route path="/payment-status/:requestId" element={<PaymentStatusPage platform={platform} />} />
         <Route path="/student-login" element={<StudentLoginPage loginStudent={loginStudent} />} />
         <Route path="/teacher-login" element={<TeacherLoginPage loginTeacher={loginTeacher} />} />
 
         <Route element={<ProtectedRoute allowedRole="student" auth={auth} />}>
           <Route path="/student/dashboard" element={<StudentDashboardPage student={student} platform={platform} logout={logout} />} />
           <Route path="/student/courses" element={<StudentCoursesPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
-          <Route path="/student/subscriptions" element={<StudentSubscriptionsPage platform={platform} student={student} logout={logout} purchaseSubscription={purchaseSubscription} />} />
+          <Route path="/student/subscriptions" element={<StudentSubscriptionsPage platform={platform} student={student} authSubscription={auth.subscription} studentCode={auth.studentCode} logout={logout} purchaseSubscription={purchaseSubscription} />} />
           <Route path="/student/course/:courseId" element={<StudentCourseDetailPage platform={platform} student={student} logout={logout} purchaseCourse={purchaseCourse} />} />
           <Route path="/student/lessons" element={<StudentLessonsPage platform={platform} student={student} logout={logout} />} />
           <Route path="/student/lesson/:lessonId" element={<StudentLessonDetailPage platform={platform} student={student} logout={logout} />} />
@@ -737,7 +799,7 @@ function App() {
           <Route path="/teacher/student-codes" element={<StudentCodesPage platform={platform} generateStudentCode={generateStudentCode} assignCodeToStudent={assignCodeToStudent} toggleCodeStatus={toggleCodeStatus} deleteCode={deleteCode} logout={logout} />} />
           <Route path="/teacher/attendance" element={<TeacherAttendancePage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
           <Route path="/teacher/fees" element={<TeacherFeesPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
-          <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} updateCoursePaymentStatus={updateCoursePaymentStatus} updateSubscriptionStatus={updateSubscriptionStatus} updateSubscriptionPlanPrice={updateSubscriptionPlanPrice} logout={logout} />} />
+          <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} approveSubscriptionRequest={approveSubscriptionRequest} updateCoursePaymentStatus={updateCoursePaymentStatus} updateSubscriptionStatus={updateSubscriptionStatus} updateSubscriptionPlanPrice={updateSubscriptionPlanPrice} logout={logout} />} />
           <Route path="/teacher/reports" element={<TeacherReportsPage platform={platform} logout={logout} />} />
           <Route path="/teacher/courses" element={<CourseManagementPage platform={platform} addCourse={addCourse} deleteCourse={deleteCourse} logout={logout} />} />
           <Route path="/teacher/lessons" element={<LessonManagementPage platform={platform} addLesson={addLesson} deleteLesson={deleteLesson} logout={logout} />} />
@@ -755,12 +817,22 @@ function App() {
 }
 
 function ProtectedRoute({ auth, allowedRole }) {
+  const location = useLocation()
+
   if (!auth.role) {
     return <Navigate to={allowedRole === 'student' ? '/student-login' : '/teacher-login'} replace />
   }
 
   if (auth.role !== allowedRole) {
     return <Navigate to='/' replace />
+  }
+
+  if (
+    allowedRole === 'student'
+    && auth.subscriptionStatus === 'expired'
+    && !location.pathname.startsWith('/student/subscriptions')
+  ) {
+    return <Navigate to='/student/subscriptions' replace />
   }
 
   return <Outlet />
@@ -846,7 +918,7 @@ function HomePage({ platform }) {
 
         <nav className='header-nav'>
           <Link to='/'>Home</Link>
-          <Link to='/plans'>الباقات</Link>
+          <Link to='/plans'>Plans</Link>
           <Link to='/student-login'>Student Login</Link>
           <Link to='/teacher-login'>Teacher Login</Link>
         </nav>
@@ -925,7 +997,7 @@ function HomePage({ platform }) {
       <section className='plans-section'>
         <div className='section-heading'>
           <span className='eyebrow'>Simple monthly plans</span>
-          <h2>اختار الباقة المناسبة لك</h2>
+          <h2>Choose your Plan</h2>
           <p>اشترك شهريًا وابدأ التعلم فور اعتماد التحويل أو الدفع اليدوي.</p>
         </div>
         <div className='plans-grid'>
@@ -947,7 +1019,19 @@ function HomePage({ platform }) {
   )
 }
 
-function PlansPage({ platform }) {
+function PlansPage({ platform, createSubscriptionRequest }) {
+  const navigate = useNavigate()
+  const [form, setForm] = useState({ name: '', phone: '', email: '', planId: platform.subscriptionPlans?.[0]?.id || 'basic', paymentMethod: 'instapay' })
+  const [error, setError] = useState('')
+  const submit = (event) => {
+    event.preventDefault()
+    if (!form.name.trim() || !form.phone.trim()) {
+      setError('اكتب الاسم ورقم الهاتف.')
+      return
+    }
+    const requestId = createSubscriptionRequest(form)
+    navigate(`/payment-status/${requestId}`)
+  }
   return (
     <div className='page-shell'>
       <header className='landing-header'>
@@ -959,9 +1043,18 @@ function PlansPage({ platform }) {
       </header>
       <section className='section-heading plans-page-heading'>
         <span className='eyebrow'>Monthly subscriptions</span>
-        <h1>باقات اشتراك مرنة</h1>
-        <p>اختر الباقة، ثم أرسل طلبك. سيقوم المدرس بتأكيد الدفع يدويًا وتفعيل اشتراكك.</p>
+        <h1>Plans</h1>
+        <p>اختر الباقة وأرسل بياناتك. بعد تأكيد الدفع سيظهر كود الدخول في نفس الصفحة.</p>
       </section>
+      <form className='panel form-stack' onSubmit={submit}>
+        <div className='form-group'><label>اسم الطالب</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
+        <div className='form-group'><label>رقم الهاتف</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required /></div>
+        <div className='form-group'><label>البريد الإلكتروني (اختياري)</label><input type='email' value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+        <div className='form-group'><label>Plan</label><select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })}>{(platform.subscriptionPlans || []).map((plan) => <option key={plan.id} value={plan.id}>{plan.name} - {formatCurrency(plan.price)}</option>)}</select></div>
+        <div className='form-group'><label>طريقة الدفع</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}><option value='instapay'>InstaPay - 01014812293</option><option value='cash'>تحويل/اتفاق مع المدرس</option></select></div>
+        {error ? <div className='message-bad'>{error}</div> : null}
+        <button className='primary-button' type='submit'>إرسال طلب الاشتراك</button>
+      </form>
       <div className='plans-grid'>
         {(platform.subscriptionPlans || []).map((plan) => (
           <div key={plan.id} className='plan-card'>
@@ -978,7 +1071,23 @@ function PlansPage({ platform }) {
   )
 }
 
-function StudentSubscriptionsPage({ platform, student, logout }) {
+function PaymentStatusPage({ platform }) {
+  const { requestId } = useParams()
+  const request = (platform.subscriptionRequests || []).find((item) => item.id === requestId)
+  const plan = platform.subscriptionPlans?.find((item) => item.id === request?.planId)
+  return (
+    <div className='page-shell'>
+      <header className='landing-header'><Link className='brand-row' to='/plans'><div className='brand-icon large'><GraduationCap size={24} /></div><div><div className='brand-title'>Mr Abdelrahman Mohamed</div></div></Link></header>
+      <div className='panel'>
+        {!request ? <h2>طلب الاشتراك غير موجود</h2> : request.status === 'paid' ? (
+          <><h2>تم الدفع وتفعيل الاشتراك</h2><p>الطالب: {request.name}</p><p>الباقة: {plan?.name}</p><div className='welcome-box'><strong>كود الدخول الخاص بك</strong><code>{request.code}</code></div><Link className='primary-button' to='/student-login'>الدخول بالكود</Link></>
+        ) : <><h2>طلب الاشتراك قيد المراجعة</h2><p>سيظهر كود الدخول هنا فور تأكيد المدرس للدفع.</p><p>رقم الطلب: {request.id}</p></>}
+      </div>
+    </div>
+  )
+}
+
+function StudentSubscriptionsPage({ platform, student, authSubscription, studentCode, logout }) {
   const sidebar = [
     { to: '/student/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
     { to: '/student/courses', label: 'Courses', icon: <BookMarked size={16} /> },
@@ -991,14 +1100,28 @@ function StudentSubscriptionsPage({ platform, student, logout }) {
   const [paymentError, setPaymentError] = useState('')
   const [paymentLoading, setPaymentLoading] = useState('')
   const subscriptions = student?.personalFile?.subscriptions || []
+  const currentSubscription = subscriptions
+    .filter((item) => item.status === 'active' || item.status === 'paid')
+    .sort((a, b) => new Date(b.expiresAt || b.expires_at || 0) - new Date(a.expiresAt || a.expires_at || 0))[0]
+    || authSubscription
   const startPayment = async (planId) => {
     setPaymentError('')
+    if (paymentMethod[planId] === 'instapay') {
+      setPaymentError('InstaPay على الرقم 01014812293 لا يدعم تأكيدًا آليًا من بوابة شخصية. استخدم بطاقة/محفظة/فوري للتفعيل التلقائي.')
+      return
+    }
     setPaymentLoading(planId)
     try {
       const checkoutUrl = await createPaymentCheckout({
-        studentCode: student.code,
+        studentCode: studentCode || student.code,
         planId,
         paymentMethod: paymentMethod[planId] || 'card',
+        customer: {
+          first_name: student?.name?.split(' ')[0],
+          last_name: student?.name?.split(' ').slice(1).join(' '),
+          email: student?.email,
+          phone: student?.phone,
+        },
       })
       window.location.assign(checkoutUrl)
     } catch (error) {
@@ -1009,6 +1132,18 @@ function StudentSubscriptionsPage({ platform, student, logout }) {
   }
   return (
     <AppShell sidebar={sidebar} topbarTitle='اشتراكاتي' logout={logout}>
+      {currentSubscription ? (
+        <div className='welcome-box'>
+          <div>
+            <span className='eyebrow'>الاشتراك الحالي</span>
+            <h2>{currentSubscription.planName || currentSubscription.plan_name}</h2>
+            <p>ينتهي في {new Date(currentSubscription.expiresAt || currentSubscription.expires_at).toLocaleDateString('ar-EG')}</p>
+          </div>
+          <span className='badge success'>نشط</span>
+        </div>
+      ) : (
+        <div className='payment-instructions'>لا يوجد اشتراك نشط. اختر باقة لإعادة تفعيل المحتوى المدفوع.</div>
+      )}
       <div className='plans-grid'>
         {(platform.subscriptionPlans || []).map((plan) => {
           const subscription = subscriptions.find((item) => item.planId === plan.id && item.status !== 'cancelled')
@@ -1019,15 +1154,17 @@ function StudentSubscriptionsPage({ platform, student, logout }) {
               <p>{plan.description}</p>
               <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
               <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
-              {subscription ? <span className={`badge ${subscription.status === 'paid' ? 'success' : 'warn'}`}>{subscription.status === 'paid' ? 'نشط' : 'قيد المراجعة'}</span> : (
+              {subscription ? <span className={`badge ${subscription.status === 'active' || subscription.status === 'paid' ? 'success' : 'warn'}`}>{subscription.status === 'active' || subscription.status === 'paid' ? 'نشط' : 'قيد المراجعة'}</span> : (
                 <div className='form-stack full'>
                   <select value={paymentMethod[plan.id] || 'card'} onChange={(event) => setPaymentMethod({ ...paymentMethod, [plan.id]: event.target.value })}>
                     <option value='card'>بطاقة بنكية</option>
                     <option value='wallet'>محفظة إلكترونية</option>
                     <option value='fawry'>فوري</option>
+                    <option value='instapay'>InstaPay (تحويل يدوي)</option>
                   </select>
                   <div className='payment-instructions'>
                     سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام العملية. لن يتم تفعيل الاشتراك إلا بعد تأكيد الدفع من البوابة.
+                    {paymentMethod[plan.id] === 'instapay' ? ' التحويل عبر InstaPay إلى 01014812293 لا يملك webhook تلقائيًا؛ استخدم بوابة الدفع للدفع والتفعيل الآلي.' : ''}
                   </div>
                   <button className='primary-button full' type='button' disabled={paymentLoading === plan.id} onClick={() => startPayment(plan.id)}>
                     {paymentLoading === plan.id ? 'جاري فتح بوابة الدفع...' : 'الدفع وتفعيل الاشتراك'}
@@ -1047,15 +1184,18 @@ function StudentLoginPage({ loginStudent }) {
   const navigate = useNavigate()
   const [value, setValue] = useState('')
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    const result = loginStudent(value)
+    setLoading(true)
+    const result = await loginStudent(value)
     if (result.ok) {
-      navigate('/student/dashboard')
-      return
+      navigate(result.redirectTo || '/student/dashboard')
+    } else {
+      setMessage(result.message)
     }
-    setMessage(result.message)
+    setLoading(false)
   }
 
   return (
@@ -1081,7 +1221,9 @@ function StudentLoginPage({ loginStudent }) {
               placeholder='STU-8K4P-29MX'
             />
           </div>
-          <button type='submit' className='primary-button full'>Access Platform</button>
+          <button type='submit' className='primary-button full' disabled={loading}>
+            {loading ? 'جاري التحقق...' : 'Access Platform'}
+          </button>
         </form>
 
         {message && <div className='message-bad'>{message}</div>}
@@ -1266,11 +1408,11 @@ function StudentCoursesPage({ platform, student, logout, purchaseCourse }) {
               <div className='progress-bar'><span style={{ width: `${course.progress}%` }} /></div>
               {isPaidCourse && !hasPaidAccess ? (
                 <div className='form-stack'>
-                  <select value={selectedPaymentMethod[course.id] || 'vodafone_cash'} onChange={(event)=> setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
-                    <option value='vodafone_cash'>فودافون كاش ({PAYMENT_PHONE})</option>
+                  <select value={selectedPaymentMethod[course.id] || 'instapay'} onChange={(event)=> setSelectedPaymentMethod({ ...selectedPaymentMethod, [course.id]: event.target.value })}>
+                    <option value='instapay'>InstaPay ({PAYMENT_PHONE})</option>
                     <option value='visa'>فيزا</option>
                   </select>
-                  <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, selectedPaymentMethod[course.id] || 'vodafone_cash', 'pending')}>
+                  <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, selectedPaymentMethod[course.id] || 'instapay', 'pending')}>
                     إرسال طلب الدفع - {formatCurrency(course.price)}
                   </button>
                 </div>
@@ -1323,11 +1465,11 @@ function StudentCourseDetailPage({ platform, student, logout, purchaseCourse }) 
           ) : (
             <div className='form-stack'>
               <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                <option value='vodafone_cash'>فودافون كاش ({PAYMENT_PHONE})</option>
+                <option value='instapay'>InstaPay ({PAYMENT_PHONE})</option>
                 <option value='visa'>فيزا</option>
               </select>
               <div className='payment-instructions'>
-                {paymentMethod === 'visa' ? 'الدفع بالفيزا متاح يدويًا، تواصل مع المدرس لتأكيد التفاصيل.' : `حوّل المبلغ على فودافون كاش: ${PAYMENT_PHONE}`}
+                {paymentMethod === 'visa' ? 'الدفع بالفيزا متاح يدويًا، تواصل مع المدرس لتأكيد التفاصيل.' : `حوّل المبلغ عبر InstaPay إلى: ${PAYMENT_PHONE}`}
                 <small>بعد التحويل أرسل صورة الإيصال للمدرس للمراجعة.</small>
               </div>
               <button type='button' className='primary-button' onClick={() => purchaseCourse(student.id, course.id, paymentMethod, 'pending')}>
@@ -1726,9 +1868,7 @@ function TeacherDashboardPage({ platform, logout }) {
             <h3>النشاط الأخير للطلاب</h3>
           </div>
           <ul className='activity-list'>
-            <li>أمينة حسن أكملت تحدي الاستماع.</li>
-            <li>عمر صالح بدأ مراجعة المفردات.</li>
-            <li>سارة علي أرسلت واجب الكتابة.</li>
+            <li>تظهر أنشطة الطلاب الجدد هنا بعد تسجيلها.</li>
           </ul>
         </div>
 
@@ -1760,7 +1900,7 @@ function StudentsPage({ platform, addStudent, deleteStudent, updateStudentStatus
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    if (!form.name || !form.email) return
+    if (!form.name) return
     const studentCode = form.code || getUniqueCode()
     const existing = platform.students.find((item) => item.email === form.email)
     if (existing) {
@@ -1768,7 +1908,7 @@ function StudentsPage({ platform, addStudent, deleteStudent, updateStudentStatus
       return
     }
 
-    addStudent({ name: form.name, email: form.email, level: form.level, code: studentCode })
+    addStudent({ name: form.name, email: form.email, level: form.level, code: studentCode.trim().toUpperCase() })
     setForm({ name: '', email: '', level: 'Beginner', code: '' })
   }
 
@@ -2190,7 +2330,7 @@ function TeacherReportsPage({ platform, logout }) {
   )
 }
 
-function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateSubscriptionStatus, updateSubscriptionPlanPrice, logout }) {
+function TeacherSubscriptionsPage({ platform, approveSubscriptionRequest, updateCoursePaymentStatus, updateSubscriptionStatus, updateSubscriptionPlanPrice, logout }) {
   const teacherSidebar = getTeacherSidebar()
   const [planPrices, setPlanPrices] = useState(() => Object.fromEntries(
     (platform.subscriptionPlans || []).map((plan) => [plan.id, plan.price]),
@@ -2245,6 +2385,19 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateS
       </div>
 
       <div className='panel'>
+        <div className='panel-header'><h3>طلبات Plans الجديدة</h3></div>
+        <div className='list-table'>
+          {(platform.subscriptionRequests || []).filter((item) => item.status === 'pending').map((item) => (
+            <div key={item.id} className='table-row'>
+              <div><strong>{item.name}</strong><small>{item.phone}</small></div>
+              <div>{platform.subscriptionPlans.find((plan) => plan.id === item.planId)?.name}</div>
+              <div>{item.paymentMethod === 'instapay' ? 'InstaPay' : item.paymentMethod}</div>
+              <button className='mini-button' onClick={() => approveSubscriptionRequest(item.id)}>تأكيد الدفع وإنشاء الكود</button>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className='panel'>
         <div className='panel-header'>
           <div>
             <h3>أسعار الباقات</h3>
@@ -2265,7 +2418,7 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateS
                   onChange={(event) => setPlanPrices({ ...planPrices, [plan.id]: event.target.value })}
                   placeholder='اكتب السعر'
                 />
-                <span>ر.س / شهر</span>
+                <span>ج.م / شهر</span>
                 <button
                   type='button'
                   className='mini-button'
@@ -2290,7 +2443,7 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateS
                 <div><strong>{item.studentName}</strong></div>
                 <div>{item.courseTitle}</div>
                 <div>{formatCurrency(item.amount)}</div>
-                <div>{item.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
+                <div>{item.paymentMethod === 'instapay' ? 'InstaPay' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
                 <div>
                   <select value={item.status} onChange={(event) => updateCoursePaymentStatus(item.studentId, item.courseId, event.target.value)}>
                     <option value='paid'>مدفوع</option>
@@ -2311,7 +2464,7 @@ function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, updateS
               <div><strong>{item.studentName}</strong></div>
               <div>{item.planName}</div>
               <div>{formatCurrency(item.amount)}</div>
-              <div>{item.paymentMethod === 'vodafone_cash' ? 'فودافون كاش' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
+              <div>{item.paymentMethod === 'instapay' ? 'InstaPay' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
               <div>
                 <select value={item.status} onChange={(event) => updateSubscriptionStatus(item.studentId, item.id, event.target.value)}>
                   <option value='paid'>مفعل</option>
