@@ -22,13 +22,13 @@ Deno.serve(async (request) => {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   let paymentId = "";
   try {
-    const { code, plan_slug, idempotency_key, payment_method, customer } = await request.json();
-    if (typeof code !== "string" || typeof plan_slug !== "string" || typeof idempotency_key !== "string" ||
+    const { student_code, plan_id, idempotency_key, payment_method, customer } = await request.json();
+    if (typeof student_code !== "string" || typeof plan_id !== "string" || typeof idempotency_key !== "string" ||
         !/^[\w:.\/-]{8,128}$/.test(idempotency_key) ||
         !["card", "wallet", "fawry"].includes(payment_method)) return json({ error: "invalid_request" }, 400);
-    const { data: student, error: codeError } = await supabase.rpc("validate_student_code", { input_code: code });
+    const { data: student, error: codeError } = await supabase.rpc("validate_student_code", { input_code: student_code });
     if (codeError || !student?.[0]) return json({ error: "invalid_or_expired_code" }, 403);
-    const { data: plan, error: planError } = await supabase.from("plans").select("*").eq("slug", plan_slug).eq("active", true).maybeSingle();
+    const { data: plan, error: planError } = await supabase.from("plans").select("*").eq("id", plan_id).eq("active", true).maybeSingle();
     if (planError || !plan) return json({ error: "plan_unavailable" }, 404);
     const studentId = student[0].student_id;
     const codeId = student[0].code_id;

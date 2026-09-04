@@ -21,12 +21,7 @@ for each row
 execute function public.update_platform_updated_at();
 
 drop policy if exists "platform_data_public_access" on public.platform_data;
-create policy "platform_data_public_access"
-on public.platform_data
-for all
-to anon, authenticated
-using (true)
-with check (true);
+revoke all on public.platform_data from anon, authenticated;
 
 insert into public.platform_data (id, payload)
 values ('main', '{}')

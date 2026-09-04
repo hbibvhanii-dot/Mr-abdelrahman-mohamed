@@ -4,7 +4,9 @@
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Run the SQL from `supabase/schema.sql`, then `supabase/subscriptions.sql`.
+2. Run the SQL from `supabase/schema.sql`, then `supabase/subscriptions.sql`, then
+   `supabase/persistence.sql`. The last script migrates legacy students/codes
+   safely and exposes the shared-data RPCs used by the frontend.
 3. Copy `.env.example` to `.env` and fill in your project URL and anon key.
 4. Start the app with `npm run dev`.
 

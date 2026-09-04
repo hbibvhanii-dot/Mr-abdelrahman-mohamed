@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BrowserRouter,
   NavLink,
@@ -57,7 +57,21 @@ import {
   BellRing,
   RefreshCw,
 } from 'lucide-react'
-import { authenticateStudentCode, canUseSupabase, createPaymentCheckout, loadPlatformFromSupabase, savePlatformToSupabase } from './lib/supabase'
+import {
+  assignCodeInSupabase,
+  authenticateStudentCode,
+  canUseSupabase,
+  createCodeInSupabase,
+  createPaymentCheckout,
+  createStudentInSupabase,
+  deleteCodeInSupabase,
+  deleteStudentInSupabase,
+  loadActivePlans,
+  loadPlatformFromSupabase,
+  savePlatformToSupabase,
+  toggleCodeInSupabase,
+  updateStudentInSupabase,
+} from './lib/supabase'
 
 const STORAGE_KEY = 'mr-abdelrahman-platform'
 const TEACHER_PASSWORD = 'mr-abdelrahman123'
@@ -148,61 +162,27 @@ function normalizePlatformData(value) {
 }
 
 function getInitialPlatform() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) return defaultPlatform
-
-    const parsed = JSON.parse(saved)
-    if (isValidPlatformData(parsed)) {
-      return normalizePlatformData(parsed)
-    }
-
-    return defaultPlatform
-  } catch {
-    return defaultPlatform
-  }
+  return defaultPlatform
 }
 
 function hasValidLocalPlatform() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? isValidPlatformData(JSON.parse(saved)) : false
-  } catch {
-    return false
-  }
+  return false
 }
 
 async function hydratePlatformFromSupabase(setPlatform) {
-  if (!canUseSupabase()) return false
+  if (!canUseSupabase()) return null
 
   try {
     const externalData = await loadPlatformFromSupabase()
-    if (isValidPlatformData(externalData)) {
-      let localData = null
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        localData = saved ? JSON.parse(saved) : null
-      } catch (error) {
-        console.error('Failed to read local platform backup:', error)
-      }
-      const remotePlatform = normalizePlatformData(externalData)
-      const localPlatform = localData && isValidPlatformData(localData)
-        ? normalizePlatformData(localData)
-        : null
-      const remoteIsEmpty = remotePlatform.students.length === 0
-        && remotePlatform.codes.length === 0
-      if (remoteIsEmpty && localPlatform && (localPlatform.students.length > 0 || localPlatform.codes.length > 0)) {
-        setPlatform(localPlatform)
-      } else {
-        setPlatform(remotePlatform)
-      }
-      return true
+    if (externalData && typeof externalData === 'object') {
+      setPlatform(normalizePlatformData({ ...defaultPlatform, ...externalData }))
+      return externalData
     }
   } catch (error) {
     console.error('Failed to hydrate platform from Supabase:', error)
   }
 
-  return false
+  return null
 }
 
 function getUniqueCode() {
@@ -216,6 +196,11 @@ function formatCurrency(value) {
   return `${Number(value || 0).toLocaleString('ar-EG')} ج.م`
 }
 
+function getPersistablePlatformSnapshot(platform) {
+  const { students, codes, subscriptionPlans, subscriptionRequests, ...shared } = platform
+  return JSON.stringify(shared)
+}
+
 function App() {
   const [platform, setPlatform] = useState(getInitialPlatform)
   const [platformHydrated, setPlatformHydrated] = useState(() => !canUseSupabase())
@@ -223,6 +208,7 @@ function App() {
     () => !canUseSupabase(),
   )
   const [persistenceError, setPersistenceError] = useState(null)
+  const lastPersistedPlatformRef = useRef('')
   const [auth, setAuth] = useState(() => {
     try {
       const session = JSON.parse(localStorage.getItem('mr-platform-auth') || 'null')
@@ -246,11 +232,11 @@ function App() {
 
   useEffect(() => {
     hydratePlatformFromSupabase(setPlatform)
-      .then((hasExternalData) => {
-        // Seed an empty Supabase project from the existing platform once.
-        // Subsequent devices hydrate from the shared record.
-        if (!hasExternalData && !hasValidLocalPlatform()) {
+      .then((externalData) => {
+        if (!externalData) {
           setPlatform(defaultPlatform)
+        } else {
+          lastPersistedPlatformRef.current = getPersistablePlatformSnapshot({ ...defaultPlatform, ...externalData })
         }
         setPersistenceReady(true)
       })
@@ -258,17 +244,34 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!canUseSupabase()) return
+    loadActivePlans()
+      .then((plans) => {
+        setPlatform((current) => ({ ...current, subscriptionPlans: plans }))
+      })
+      .catch((error) => {
+        console.error('Failed to load active plans from Supabase:', error)
+      })
+  }, [])
+
+  useEffect(() => {
     if (!platformHydrated || !persistenceReady) return
+    const snapshot = getPersistablePlatformSnapshot(platform)
+    if (snapshot === lastPersistedPlatformRef.current) return
 
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(platform))
+      const { students, codes, subscriptionPlans, subscriptionRequests, ...cache } = platform
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cache))
     } catch (error) {
       console.error('Failed to save platform to localStorage:', error)
     }
 
     if (canUseSupabase()) {
       savePlatformToSupabase(platform)
-        .then(() => setPersistenceError(null))
+        .then(() => {
+          lastPersistedPlatformRef.current = snapshot
+          setPersistenceError(null)
+        })
         .catch((error) => {
           console.error('Failed to save platform to Supabase:', error)
           setPersistenceError(error)
@@ -351,6 +354,7 @@ function App() {
           role: 'student',
           studentId: matchedStudent.id,
           teacher: false,
+          studentCode: normalized,
           subscriptionStatus: activeSubscription ? 'active' : 'expired',
           subscriptionExpiresAt: activeSubscription?.expiresAt || activeSubscription?.expires_at || null,
         })
@@ -377,10 +381,22 @@ function App() {
     setAuth({ role: null, studentId: null, teacher: false })
   }
 
-  const generateStudentCode = (studentName = 'Unassigned') => {
+  const refreshSharedPlatform = async () => {
+    if (!canUseSupabase()) return
+    const remote = await loadPlatformFromSupabase()
+    if (remote) setPlatform(normalizePlatformData({ ...defaultPlatform, ...remote }))
+  }
+
+  const generateStudentCode = async (studentName = 'Unassigned', studentId = null) => {
     let nextCode = getUniqueCode()
     while (platform.codes.some((item) => item.code === nextCode)) {
       nextCode = getUniqueCode()
+    }
+
+    if (canUseSupabase()) {
+      const created = await createCodeInSupabase(nextCode, studentId)
+      await refreshSharedPlatform()
+      return created
     }
 
     const newCode = {
@@ -396,7 +412,12 @@ function App() {
     return newCode
   }
 
-  const assignCodeToStudent = (codeId, studentId) => {
+  const assignCodeToStudent = async (codeId, studentId) => {
+    if (canUseSupabase()) {
+      await assignCodeInSupabase(codeId, studentId)
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       codes: current.codes.map((code) =>
@@ -412,7 +433,12 @@ function App() {
     }))
   }
 
-  const toggleCodeStatus = (codeId) => {
+  const toggleCodeStatus = async (codeId) => {
+    if (canUseSupabase()) {
+      await toggleCodeInSupabase(codeId)
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       codes: current.codes.map((code) =>
@@ -421,14 +447,24 @@ function App() {
     }))
   }
 
-  const deleteCode = (codeId) => {
+  const deleteCode = async (codeId) => {
+    if (canUseSupabase()) {
+      await deleteCodeInSupabase(codeId)
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       codes: current.codes.filter((code) => code.id !== codeId),
     }))
   }
 
-  const addStudent = (newStudent) => {
+  const addStudent = async (newStudent) => {
+    if (canUseSupabase()) {
+      await createStudentInSupabase(newStudent)
+      await refreshSharedPlatform()
+      return
+    }
     const studentRecord = {
       id: `stu-${Date.now()}`,
       name: newStudent.name,
@@ -462,7 +498,32 @@ function App() {
     }
   }
 
-  const addStudentRecord = (studentId, section, item) => {
+  const addStudentRecord = async (studentId, section, item) => {
+    const existingStudent = platform.students.find((student) => student.id === studentId)
+    if (canUseSupabase() && existingStudent) {
+      const nextStudent = {
+        ...existingStudent,
+        personalFile: {
+          ...(existingStudent.personalFile || {}),
+          [section]: [...((existingStudent.personalFile || {})[section] || []), item],
+        },
+      }
+      await updateStudentInSupabase(studentId, {
+        name: nextStudent.name,
+        email: nextStudent.email,
+        phone: nextStudent.phone,
+        metadata: {
+          ...nextStudent.metadata,
+          level: nextStudent.level,
+          status: nextStudent.status,
+          progress: nextStudent.progress,
+          lastActivity: nextStudent.lastActivity,
+          personalFile: nextStudent.personalFile,
+        },
+      })
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       students: current.students.map((student) => {
@@ -480,6 +541,37 @@ function App() {
   }
 
   const purchaseCourse = (studentId, courseId, paymentMethod = 'cash', status = 'paid') => {
+    if (canUseSupabase()) {
+      const student = platform.students.find((item) => item.id === studentId)
+      const course = platform.courses.find((item) => item.id === courseId)
+      if (!student || !course) return
+      const currentFile = student.personalFile || {}
+      const existingPayments = currentFile.coursePayments || []
+      const nextPayment = {
+        id: `payment-${Date.now()}`,
+        courseId,
+        courseTitle: course.title || 'Course',
+        amount: Number(course.price || 0),
+        paymentMethod,
+        status,
+        purchasedAt: new Date().toISOString(),
+      }
+      const hasPaidAccess = existingPayments.some((payment) => payment.courseId === courseId && payment.status === 'paid')
+      const nextStudent = {
+        ...student,
+        personalFile: {
+          ...currentFile,
+          purchasedCourses: status === 'paid'
+            ? Array.from(new Set([...(currentFile.purchasedCourses || []), courseId]))
+            : currentFile.purchasedCourses || [],
+          coursePayments: hasPaidAccess ? existingPayments : [...existingPayments, nextPayment],
+        },
+      }
+      updateStudentInSupabase(studentId, { metadata: { ...student.metadata, personalFile: nextStudent.personalFile } })
+        .then(refreshSharedPlatform)
+        .catch((error) => setPersistenceError(error))
+      return
+    }
     setPlatform((current) => {
       const course = current.courses.find((item) => item.id === courseId)
       const nextPayment = {
@@ -515,6 +607,23 @@ function App() {
   }
 
   const updateCoursePaymentStatus = (studentId, courseId, status) => {
+    if (canUseSupabase()) {
+      const student = platform.students.find((item) => item.id === studentId)
+      if (!student) return
+      const currentFile = student.personalFile || {}
+      const coursePayments = (currentFile.coursePayments || []).map((payment) =>
+        payment.courseId === courseId ? { ...payment, status } : payment,
+      )
+      const purchasedCourses = status === 'paid'
+        ? Array.from(new Set([...(currentFile.purchasedCourses || []), courseId]))
+        : (currentFile.purchasedCourses || []).filter((id) => id !== courseId)
+      updateStudentInSupabase(studentId, {
+        metadata: { ...student.metadata, personalFile: { ...currentFile, purchasedCourses, coursePayments } },
+      })
+        .then(refreshSharedPlatform)
+        .catch((error) => setPersistenceError(error))
+      return
+    }
     setPlatform((current) => ({
       ...current,
       students: current.students.map((student) => {
@@ -540,85 +649,9 @@ function App() {
     }))
   }
 
-  const purchaseSubscription = (studentId, planId, paymentMethod = 'cash') => {
-    setPlatform((current) => {
-      const plan = current.subscriptionPlans?.find((item) => item.id === planId)
-      if (!plan) return current
-      return {
-        ...current,
-        students: current.students.map((student) => {
-          if (student.id !== studentId) return student
-          const currentFile = student.personalFile || {}
-          const subscriptions = currentFile.subscriptions || []
-          const existing = subscriptions.find((subscription) => subscription.planId === planId && subscription.status !== 'cancelled')
-          if (existing) return student
-          return {
-            ...student,
-            personalFile: {
-              ...currentFile,
-              subscriptions: [{
-                id: `subscription-${Date.now()}`,
-                planId: plan.id,
-                planName: plan.name,
-                amount: plan.price,
-                paymentMethod,
-                status: 'pending',
-                subscribedAt: new Date().toISOString(),
-              }, ...subscriptions],
-            },
-          }
-
-          const createSubscriptionRequest = ({ name, phone, email, planId, paymentMethod }) => {
-            const request = {
-              id: `request-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              name: name.trim(),
-              phone: phone.trim(),
-              email: email.trim(),
-              planId,
-              paymentMethod,
-              status: 'pending',
-              createdAt: new Date().toISOString(),
-              code: null,
-            }
-            setPlatform((current) => ({
-              ...current,
-              subscriptionRequests: [request, ...(current.subscriptionRequests || [])],
-            }))
-            return request.id
-          }
-
-          const approveSubscriptionRequest = (requestId) => {
-            setPlatform((current) => {
-              const request = (current.subscriptionRequests || []).find((item) => item.id === requestId)
-              if (!request || request.status === 'paid') return current
-              const plan = current.subscriptionPlans.find((item) => item.id === request.planId)
-              if (!plan) return current
-              const code = getUniqueCode()
-              const studentId = `stu-${Date.now()}`
-              const student = {
-                id: studentId, name: request.name, email: request.email, phone: request.phone,
-                level: 'مبتدئ', joinDate: new Date().toISOString().slice(0, 10), status: 'active',
-                progress: 0, lastActivity: 'الآن', code,
-                personalFile: { examResults: [], attendance: [], monthlyFees: [], purchasedCourses: [], subscriptions: [{
-                  id: `subscription-${Date.now()}`, planId: plan.id, planName: plan.name, amount: plan.price,
-                  paymentMethod: request.paymentMethod, status: 'paid', subscribedAt: new Date().toISOString(),
-                  startsAt: new Date().toISOString(),
-                  expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-                }] },
-              }
-              return {
-                ...current,
-                students: [student, ...current.students],
-                codes: [{ id: `code-${Date.now()}`, code, studentId, studentName: request.name, status: 'active', createdAt: student.joinDate }, ...current.codes],
-                subscriptionRequests: current.subscriptionRequests.map((item) => item.id === requestId
-                  ? { ...item, status: 'paid', code, studentId, confirmedAt: new Date().toISOString() } : item),
-              }
-            })
-          }
-        }),
-      }
-    })
-  }
+  const purchaseSubscription = async (studentCode, planId, paymentMethod = 'card', customer = {}) => (
+    createPaymentCheckout({ studentCode, planId, paymentMethod, customer })
+  )
 
   const updateSubscriptionStatus = (studentId, subscriptionId, status) => {
     setPlatform((current) => ({
@@ -705,7 +738,12 @@ function App() {
     setPlatform((current) => ({ ...current, assignments: [newAssignment, ...current.assignments] }))
   }
 
-  const deleteStudent = (studentId) => {
+  const deleteStudent = async (studentId) => {
+    if (canUseSupabase()) {
+      await deleteStudentInSupabase(studentId)
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       students: current.students.filter((student) => student.id !== studentId),
@@ -715,7 +753,22 @@ function App() {
     }))
   }
 
-  const updateStudentStatus = (studentId, status) => {
+  const updateStudentStatus = async (studentId, status) => {
+    const existingStudent = platform.students.find((student) => student.id === studentId)
+    if (canUseSupabase() && existingStudent) {
+      await updateStudentInSupabase(studentId, {
+        metadata: {
+          ...existingStudent.metadata,
+          level: existingStudent.level,
+          status,
+          progress: existingStudent.progress,
+          lastActivity: existingStudent.lastActivity,
+          personalFile: existingStudent.personalFile,
+        },
+      })
+      await refreshSharedPlatform()
+      return
+    }
     setPlatform((current) => ({
       ...current,
       students: current.students.map((student) =>
@@ -773,8 +826,7 @@ function App() {
       ) : null}
       <Routes>
         <Route path="/" element={<HomePage platform={platform} />} />
-        <Route path="/plans" element={<PlansPage platform={platform} createSubscriptionRequest={createSubscriptionRequest} />} />
-        <Route path="/payment-status/:requestId" element={<PaymentStatusPage platform={platform} />} />
+        <Route path="/plans" element={<PlansPage platform={platform} purchaseSubscription={purchaseSubscription} />} />
         <Route path="/student-login" element={<StudentLoginPage loginStudent={loginStudent} />} />
         <Route path="/teacher-login" element={<TeacherLoginPage loginTeacher={loginTeacher} />} />
 
@@ -799,7 +851,7 @@ function App() {
           <Route path="/teacher/student-codes" element={<StudentCodesPage platform={platform} generateStudentCode={generateStudentCode} assignCodeToStudent={assignCodeToStudent} toggleCodeStatus={toggleCodeStatus} deleteCode={deleteCode} logout={logout} />} />
           <Route path="/teacher/attendance" element={<TeacherAttendancePage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
           <Route path="/teacher/fees" element={<TeacherFeesPage platform={platform} addStudentRecord={addStudentRecord} logout={logout} />} />
-          <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} approveSubscriptionRequest={approveSubscriptionRequest} updateCoursePaymentStatus={updateCoursePaymentStatus} updateSubscriptionStatus={updateSubscriptionStatus} updateSubscriptionPlanPrice={updateSubscriptionPlanPrice} logout={logout} />} />
+          <Route path="/teacher/subscriptions" element={<TeacherSubscriptionsPage platform={platform} updateCoursePaymentStatus={updateCoursePaymentStatus} updateSubscriptionStatus={updateSubscriptionStatus} updateSubscriptionPlanPrice={updateSubscriptionPlanPrice} logout={logout} />} />
           <Route path="/teacher/reports" element={<TeacherReportsPage platform={platform} logout={logout} />} />
           <Route path="/teacher/courses" element={<CourseManagementPage platform={platform} addCourse={addCourse} deleteCourse={deleteCourse} logout={logout} />} />
           <Route path="/teacher/lessons" element={<LessonManagementPage platform={platform} addLesson={addLesson} deleteLesson={deleteLesson} logout={logout} />} />
@@ -1006,9 +1058,9 @@ function HomePage({ platform }) {
               {index === 1 ? <span className='plan-badge'>الأكثر اختيارًا</span> : null}
               <Crown size={22} />
               <h3>{plan.name}</h3>
-              <p>{plan.description}</p>
-              <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
-              <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
+              <p>{plan.description || `اشتراك لمدة ${plan.durationDays || 30} يومًا.`}</p>
+              <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ {plan.durationDays || 30} يوم</small></strong>
+              <ul>{(plan.features || []).map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
               <Link className='primary-button full' to='/student-login'>ابدأ الاشتراك</Link>
             </div>
           ))}
@@ -1019,18 +1071,33 @@ function HomePage({ platform }) {
   )
 }
 
-function PlansPage({ platform, createSubscriptionRequest }) {
-  const navigate = useNavigate()
-  const [form, setForm] = useState({ name: '', phone: '', email: '', planId: platform.subscriptionPlans?.[0]?.id || 'basic', paymentMethod: 'instapay' })
+function PlansPage({ platform, purchaseSubscription }) {
+  const [form, setForm] = useState({ studentCode: '', planId: platform.subscriptionPlans?.[0]?.id || '', paymentMethod: 'card' })
   const [error, setError] = useState('')
-  const submit = (event) => {
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    const firstPlan = platform.subscriptionPlans?.[0]
+    if (firstPlan && !platform.subscriptionPlans.some((plan) => plan.id === form.planId)) {
+      setForm((current) => ({ ...current, planId: firstPlan.id }))
+    }
+  }, [platform.subscriptionPlans, form.planId])
+
+  const submit = async (event) => {
     event.preventDefault()
-    if (!form.name.trim() || !form.phone.trim()) {
-      setError('اكتب الاسم ورقم الهاتف.')
+    setError('')
+    if (!form.studentCode.trim()) {
+      setError('اكتب Student Code صحيحًا.')
       return
     }
-    const requestId = createSubscriptionRequest(form)
-    navigate(`/payment-status/${requestId}`)
+    setLoading(true)
+    try {
+      const checkoutUrl = await purchaseSubscription(form.studentCode, form.planId, form.paymentMethod)
+      window.location.assign(checkoutUrl)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <div className='page-shell'>
@@ -1044,26 +1111,24 @@ function PlansPage({ platform, createSubscriptionRequest }) {
       <section className='section-heading plans-page-heading'>
         <span className='eyebrow'>Monthly subscriptions</span>
         <h1>Plans</h1>
-        <p>اختر الباقة وأرسل بياناتك. بعد تأكيد الدفع سيظهر كود الدخول في نفس الصفحة.</p>
+        <p>اختر الباقة وأدخل Student Code الموجود معك. لن يتفعل الاشتراك إلا بعد تأكيد Paymob.</p>
       </section>
-      <form className='panel form-stack' onSubmit={submit}>
-        <div className='form-group'><label>اسم الطالب</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
-        <div className='form-group'><label>رقم الهاتف</label><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required /></div>
-        <div className='form-group'><label>البريد الإلكتروني (اختياري)</label><input type='email' value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-        <div className='form-group'><label>Plan</label><select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })}>{(platform.subscriptionPlans || []).map((plan) => <option key={plan.id} value={plan.id}>{plan.name} - {formatCurrency(plan.price)}</option>)}</select></div>
-        <div className='form-group'><label>طريقة الدفع</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}><option value='instapay'>InstaPay - 01014812293</option><option value='cash'>تحويل/اتفاق مع المدرس</option></select></div>
+      <form id='payment-form' className='panel form-stack' onSubmit={submit}>
+        <div className='form-group'><label>Student Code</label><input value={form.studentCode} onChange={(e) => setForm({ ...form, studentCode: e.target.value })} placeholder='MR-7K4P-92QX' required /></div>
+        <div className='form-group'><label>Plan</label><select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>{(platform.subscriptionPlans || []).map((plan) => <option key={plan.id} value={plan.id}>{plan.name} - {formatCurrency(plan.price)}</option>)}</select></div>
+        <div className='form-group'><label>طريقة الدفع</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}><option value='card'>بطاقة بنكية</option><option value='wallet'>محفظة إلكترونية</option><option value='fawry'>فوري</option></select></div>
         {error ? <div className='message-bad'>{error}</div> : null}
-        <button className='primary-button' type='submit'>إرسال طلب الاشتراك</button>
+        <button className='primary-button' type='submit' disabled={loading || !form.planId}>{loading ? 'جاري فتح بوابة الدفع...' : 'الدفع عبر Paymob'}</button>
       </form>
       <div className='plans-grid'>
         {(platform.subscriptionPlans || []).map((plan) => (
           <div key={plan.id} className='plan-card'>
             <Crown size={22} />
             <h3>{plan.name}</h3>
-            <p>{plan.description}</p>
-            <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ شهر</small></strong>
-            <ul>{plan.features.map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
-            <Link className='primary-button full' to='/student-login'>اختيار الباقة</Link>
+            <p>{plan.description || `اشتراك لمدة ${plan.durationDays || 30} يومًا.`}</p>
+            <strong className='plan-price'>{formatCurrency(plan.price)} <small>/ {plan.durationDays || 30} يوم</small></strong>
+            <ul>{(plan.features || []).map((feature) => <li key={feature}><CheckCircle2 size={16} />{feature}</li>)}</ul>
+            <a className='primary-button full' href='#payment-form'>اختيار الباقة</a>
           </div>
         ))}
       </div>
@@ -1087,7 +1152,7 @@ function PaymentStatusPage({ platform }) {
   )
 }
 
-function StudentSubscriptionsPage({ platform, student, authSubscription, studentCode, logout }) {
+function StudentSubscriptionsPage({ platform, student, authSubscription, studentCode, logout, purchaseSubscription }) {
   const sidebar = [
     { to: '/student/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
     { to: '/student/courses', label: 'Courses', icon: <BookMarked size={16} /> },
@@ -1112,17 +1177,19 @@ function StudentSubscriptionsPage({ platform, student, authSubscription, student
     }
     setPaymentLoading(planId)
     try {
-      const checkoutUrl = await createPaymentCheckout({
-        studentCode: studentCode || student.code,
+      const code = studentCode || student.code
+      if (!code) throw new Error('أدخل Student Code لإتمام الدفع.')
+      const checkoutUrl = await purchaseSubscription(
+        code,
         planId,
-        paymentMethod: paymentMethod[planId] || 'card',
-        customer: {
+        paymentMethod[planId] || 'card',
+        {
           first_name: student?.name?.split(' ')[0],
           last_name: student?.name?.split(' ').slice(1).join(' '),
           email: student?.email,
           phone: student?.phone,
         },
-      })
+      )
       window.location.assign(checkoutUrl)
     } catch (error) {
       setPaymentError(error.message)
@@ -1160,11 +1227,9 @@ function StudentSubscriptionsPage({ platform, student, authSubscription, student
                     <option value='card'>بطاقة بنكية</option>
                     <option value='wallet'>محفظة إلكترونية</option>
                     <option value='fawry'>فوري</option>
-                    <option value='instapay'>InstaPay (تحويل يدوي)</option>
                   </select>
                   <div className='payment-instructions'>
                     سيتم تحويلك إلى بوابة الدفع الآمنة لإتمام العملية. لن يتم تفعيل الاشتراك إلا بعد تأكيد الدفع من البوابة.
-                    {paymentMethod[plan.id] === 'instapay' ? ' التحويل عبر InstaPay إلى 01014812293 لا يملك webhook تلقائيًا؛ استخدم بوابة الدفع للدفع والتفعيل الآلي.' : ''}
                   </div>
                   <button className='primary-button full' type='button' disabled={paymentLoading === plan.id} onClick={() => startPayment(plan.id)}>
                     {paymentLoading === plan.id ? 'جاري فتح بوابة الدفع...' : 'الدفع وتفعيل الاشتراك'}
@@ -2330,11 +2395,8 @@ function TeacherReportsPage({ platform, logout }) {
   )
 }
 
-function TeacherSubscriptionsPage({ platform, approveSubscriptionRequest, updateCoursePaymentStatus, updateSubscriptionStatus, updateSubscriptionPlanPrice, logout }) {
+function TeacherSubscriptionsPage({ platform, updateCoursePaymentStatus, logout }) {
   const teacherSidebar = getTeacherSidebar()
-  const [planPrices, setPlanPrices] = useState(() => Object.fromEntries(
-    (platform.subscriptionPlans || []).map((plan) => [plan.id, plan.price]),
-  ))
   const payments = platform.students.flatMap((student) => {
     const records = student.personalFile?.coursePayments || []
     return records.map((payment) => ({
@@ -2385,54 +2447,6 @@ function TeacherSubscriptionsPage({ platform, approveSubscriptionRequest, update
       </div>
 
       <div className='panel'>
-        <div className='panel-header'><h3>طلبات Plans الجديدة</h3></div>
-        <div className='list-table'>
-          {(platform.subscriptionRequests || []).filter((item) => item.status === 'pending').map((item) => (
-            <div key={item.id} className='table-row'>
-              <div><strong>{item.name}</strong><small>{item.phone}</small></div>
-              <div>{platform.subscriptionPlans.find((plan) => plan.id === item.planId)?.name}</div>
-              <div>{item.paymentMethod === 'instapay' ? 'InstaPay' : item.paymentMethod}</div>
-              <button className='mini-button' onClick={() => approveSubscriptionRequest(item.id)}>تأكيد الدفع وإنشاء الكود</button>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className='panel'>
-        <div className='panel-header'>
-          <div>
-            <h3>أسعار الباقات</h3>
-            <p>أدخل السعر الشهري لكل باقة وسيتم حفظه مباشرة.</p>
-          </div>
-        </div>
-        <div className='plan-price-editor'>
-          {(platform.subscriptionPlans || []).map((plan) => (
-            <div key={plan.id} className='form-group'>
-              <label htmlFor={`plan-price-${plan.id}`}>{plan.name}</label>
-              <div className='price-input-row'>
-                <input
-                  id={`plan-price-${plan.id}`}
-                  type='number'
-                  min='0'
-                  step='1'
-                  value={planPrices[plan.id] ?? ''}
-                  onChange={(event) => setPlanPrices({ ...planPrices, [plan.id]: event.target.value })}
-                  placeholder='اكتب السعر'
-                />
-                <span>ج.م / شهر</span>
-                <button
-                  type='button'
-                  className='mini-button'
-                  onClick={() => updateSubscriptionPlanPrice(plan.id, planPrices[plan.id])}
-                >
-                  حفظ السعر
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className='panel'>
         <div className='panel-header'><h3>سجل اشتراكات الطلاب</h3></div>
         <div className='list-table'>
           {payments.length === 0 ? (
@@ -2465,13 +2479,7 @@ function TeacherSubscriptionsPage({ platform, approveSubscriptionRequest, update
               <div>{item.planName}</div>
               <div>{formatCurrency(item.amount)}</div>
               <div>{item.paymentMethod === 'instapay' ? 'InstaPay' : item.paymentMethod === 'visa' ? 'فيزا' : item.paymentMethod}</div>
-              <div>
-                <select value={item.status} onChange={(event) => updateSubscriptionStatus(item.studentId, item.id, event.target.value)}>
-                  <option value='paid'>مفعل</option>
-                  <option value='pending'>قيد المراجعة</option>
-                  <option value='cancelled'>مرفوض</option>
-                </select>
-              </div>
+              <div>{item.status === 'active' ? 'مفعل' : item.status}</div>
               <div>{new Date(item.subscribedAt).toLocaleDateString('en-CA')}</div>
             </div>
           ))}
@@ -2486,14 +2494,11 @@ function StudentCodesPage({ platform, generateStudentCode, assignCodeToStudent, 
 
   const [form, setForm] = useState({ name: '', studentId: '' })
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     const name = form.studentId
       ? platform.students.find((student) => student.id === form.studentId)?.name || 'غير مسند'
       : form.name || 'غير مسند'
-    const created = generateStudentCode(name)
-    if (form.studentId) {
-      assignCodeToStudent(created.id, form.studentId)
-    }
+    await generateStudentCode(name, form.studentId || null)
     setForm({ name: '', studentId: '' })
   }
 

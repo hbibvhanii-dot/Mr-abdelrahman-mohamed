@@ -18,6 +18,10 @@ versions can differ; adjust that adapter (and the checkout URL) without changing
 database or application code. Configure the gateway webhook URL to
 `/functions/v1/payment-webhook`.
 
+`create-payment` accepts `student_code`, `plan_id`, and one of `card`, `wallet`,
+or `fawry`. It resolves both the student and the amount from Supabase; the
+frontend never supplies a payable amount.
+
 Deploy with:
 
 ```bash
